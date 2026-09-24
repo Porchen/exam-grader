@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ตรวจข้อสอบ</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1f5;--card:#fff;--ink:#0f1b2d;--mut:#5b687a;--line:#d5dbe4;--acc:#23408e;--ok:#15803d;--bad:#b91c1c;--on:#fff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0e141c;--card:#17202b;--ink:#e8edf4;--mut:#93a0b3;--line:#2b3644;--acc:#7c9cff;--ok:#4ade80;--bad:#f87171;--on:#0e141c}}
+:root[data-theme=dark]{--bg:#0e141c;--card:#17202b;--ink:#e8edf4;--mut:#93a0b3;--line:#2b3644;--acc:#7c9cff;--ok:#4ade80;--bad:#f87171;--on:#0e141c}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Sarabun,system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:1.9rem;margin:8px 0 0;line-height:1.2}h2{font-size:1.15rem;margin:0 0 8px}
+.mut{color:var(--mut)}small{font-size:.85rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0;display:block;width:100%;text-align:left;color:inherit;font:inherit;box-sizing:border-box}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer}
+button.card.row:hover{border-color:var(--acc)}
+.big{font-size:1.5rem;font-weight:700;color:var(--acc)}
+label{display:block;margin:8px 0;font-size:.92rem;color:var(--mut)}
+input,select{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px 12px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px}
+.b,.g{font:inherit;font-weight:600;border-radius:10px;padding:10px 16px;cursor:pointer;border:2px solid var(--acc);display:inline-block;margin:4px 6px 4px 0;text-align:center}
+.b{background:var(--acc);color:var(--on)}.g{background:transparent;color:var(--acc)}
+.tabs{display:flex;gap:6px;margin:12px 0;border-bottom:2px solid var(--line)}
+.tabs button{flex:1;font:inherit;font-weight:600;padding:10px;background:none;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--mut);cursor:pointer}
+.tabs button.on{color:var(--acc);border-color:var(--acc)}
+.kg{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:4px 16px}
+.kr{display:flex;align-items:center;gap:6px;padding:3px 0}.kr b{width:26px;text-align:right;color:var(--mut);font-weight:600}
+.bb{width:38px;height:38px;border-radius:50%;border:2px solid var(--ink);background:transparent;color:var(--mut);font:inherit;font-size:.8rem;cursor:pointer;padding:0}
+.bb.on{background:var(--ink);color:var(--bg);font-weight:700}
+.score{font-size:3.4rem;font-weight:700;line-height:1;color:var(--acc)}.score small{font-size:1.4rem;color:var(--mut)}
+.out canvas{width:100%;height:auto;border-radius:10px;margin:8px 0;display:block}
+video{width:100%;border-radius:12px;background:#000}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:12px 0}
+.stats div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;text-align:center;font-size:.8rem;color:var(--mut)}
+.stats b{display:block;font-size:1.3rem;color:var(--ink)}
+.err{color:var(--bad);font-weight:600}
+.sheet{background:#fff;border-radius:8px;padding:8px}
+@media print{.np{display:none!important}body{background:#fff}main{padding:0;max-width:none}.sheet{padding:0}}
+</style></head>
+<body><div id="app"></div>
+<script>
+const L='ABCDE',W=100,H=110,ROWS=10,$=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S={ex:[],v:'home',id:null,tab:'key',res:null,cam:null,msg:'',arm:null,mode:'grade',last:null};
+try{S.ex=JSON.parse(localStorage.getItem('omr_exams')||'[]')}catch(e){}
+const persist=()=>{try{localStorage.setItem('omr_exams',JSON.stringify(S.ex))}catch(e){}};
+const cur=()=>S.ex.find(e=>e.id===S.id);
+/* ตำแหน่งวงกลมบนกระดาษ (หน่วยกระดาษ 100x110) */
+const pos=(q,c)=>[12.5+Math.floor(q/ROWS)*17.5+c*2.9,16+(q%ROWS)*8.6];
+
+/* รูปแบบกระดาษ: app = พิมพ์จากแอป (A-E), std = กระดาษ 50 ข้อของครู (ก-ง) พิกัดวัดจากภาพกระดาษจริง */
+const STDX=[[136,29],[320,28.7],[501,28.4]];
+const SH={app:{W:100,H:110,nc:5,lab:'ABCDE',rp:.65,ring:1.6,pos},
+ std:{W:648.5,H:885,nc:4,lab:'กขคง',rp:6,ring:15,pos:(q,c)=>{const g=Math.floor(q/10),r=q%10,X=STDX[[0,1,1,2,2][g]];return[X[0]+c*X[1]-33,(g%2?226+r*33.4:594+r*33.55)-75.5]}}};
+const shp=ex=>SH[ex.t||'app'];
+/* ---------- กระดาษคำตอบ ---------- */
+function sheetSVG(ex){
+ let s=`<svg viewBox="-6 -6 112 122" xmlns="http://www.w3.org/2000/svg" style="width:100%;display:block" font-family="Sarabun,sans-serif" fill="#000">`;
+ [[0,0],[W,0],[0,H],[W,H]].forEach(([x,y])=>s+=`<rect x="${x-2.5}" y="${y-2.5}" width="5" height="5"/>`);
+ s+=`<text x="6" y="5" font-size="3">${esc(ex.name)}</text><text x="6" y="10" font-size="2.4">ชื่อ-สกุล ............................................. เลขที่ ......</text>`;
+ for(let q=0;q<ex.n;q++){
+  const y=pos(q,0)[1],col=Math.floor(q/ROWS);
+  if(q%ROWS==0)for(let c=0;c<5;c++)s+=`<text x="${pos(q,c)[0]}" y="13.4" font-size="1.8" text-anchor="middle">${L[c]}</text>`;
+  s+=`<text x="${10.8+col*17.5}" y="${y+.8}" font-size="2.2" text-anchor="end">${q+1}</text>`;
+  for(let c=0;c<5;c++){const[x,yy]=pos(q,c);s+=`<circle cx="${x}" cy="${yy}" r="1.1" fill="#fff" stroke="#000" stroke-width=".25"/>`}
+ }
+ return s+'</svg>';
+}
+
+/* ---------- สแกน (OMR) ---------- */
+function homog(src,dst){
+ const A=[];
+ for(let i=0;i<4;i++){const[x,y]=src[i],[u,v]=dst[i];A.push([x,y,1,0,0,0,-x*u,-y*u,u]);A.push([0,0,0,x,y,1,-x*v,-y*v,v])}
+ for(let i=0;i<8;i++){
+  let m=i;for(let r=i+1;r<8;r++)if(Math.abs(A[r][i])>Math.abs(A[m][i]))m=r;
+  [A[i],A[m]]=[A[m],A[i]];
+  for(let r=0;r<8;r++)if(r!=i){const f=A[r][i]/A[i][i];for(let c=i;c<9;c++)A[r][c]-=f*A[i][c]}
+ }
+ return A.map((r,i)=>r[8]/r[i]);
+}
+const ap=(h,x,y)=>{const d=h[6]*x+h[7]*y+1;return[(h[0]*x+h[1]*y+h[2])/d,(h[3]*x+h[4]*y+h[5])/d]};
+
+function analyze(src,sw,sh,ex,md=1100){
+ const P=shp(ex);
+ const k=Math.min(1,md/Math.max(sw,sh)),w=Math.round(sw*k),h=Math.round(sh*k);
+ const cv=document.createElement('canvas');cv.width=w;cv.height=h;
+ const cx=cv.getContext('2d',{willReadFrequently:true});cx.drawImage(src,0,0,w,h);
+ const d=cx.getImageData(0,0,w,h).data,N=w*h,g=new Uint8Array(N),hist=new Array(256).fill(0);
+ for(let i=0;i<N;i++){const v=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11)|0;g[i]=v;hist[v]++}
+ /* Otsu */
+ let sum=0;for(let i=0;i<256;i++)sum+=i*hist[i];
+ let sB=0,wB=0,best=0,t=100;
+ for(let i=0;i<256;i++){wB+=hist[i];if(!wB)continue;const wF=N-wB;if(!wF)break;sB+=i*hist[i];const mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)**2;if(v>best){best=v;t=i}}
+ t=Math.min(t,140);
+ /* หาสี่เหลี่ยมดำ (เครื่องหมายมุม) */
+ const seen=new Uint8Array(N),st=new Int32Array(N),cand=[];
+ for(let p=0;p<N;p++){
+  if(seen[p]||g[p]>=t)continue;
+  let sp=0,x0=w,x1=0,y0=h,y1=0,a=0;st[sp++]=p;seen[p]=1;
+  while(sp){
+   const q=st[--sp],x=q%w,y=(q/w)|0;a++;
+   if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;
+   if(x>0&&!seen[q-1]&&g[q-1]<t){seen[q-1]=1;st[sp++]=q-1}
+   if(x<w-1&&!seen[q+1]&&g[q+1]<t){seen[q+1]=1;st[sp++]=q+1}
+   if(y>0&&!seen[q-w]&&g[q-w]<t){seen[q-w]=1;st[sp++]=q-w}
+   if(y<h-1&&!seen[q+w]&&g[q+w]<t){seen[q+w]=1;st[sp++]=q+w}
+  }
+  const bw=x1-x0+1,bh=y1-y0+1;
+  if(bw>w*.015&&bw<w*.15&&bh>w*.015&&bh<w*.15&&bw/bh>.6&&bw/bh<1.6&&a/(bw*bh)>.8)cand.push([(x0+x1)/2,(y0+y1)/2]);
+ }
+ const bad={err:'ไม่พบสี่เหลี่ยมดำที่มุมกระดาษครบ 4 จุด ลองถ่ายให้เห็นมุมทั้งสี่ชัดเจน แสงสม่ำเสมอ และไม่มีเงาบัง'};
+ if(cand.length<4)return bad;
+ const pk=f=>cand.reduce((a,b)=>f(b)>f(a)?b:a);
+ const TL=pk(p=>-(p[0]+p[1])),TR=pk(p=>p[0]-p[1]),BL=pk(p=>p[1]-p[0]),BR=pk(p=>p[0]+p[1]);
+ if(new Set([TL,TR,BL,BR]).size<4)return bad;
+ const hm=homog([[0,0],[P.W,0],[0,P.H],[P.W,P.H]],[TL,TR,BL,BR]);
+ const p0=ap(hm,P.W/2,P.H/2),p1=ap(hm,P.W/2+1,P.H/2),u=Math.hypot(p1[0]-p0[0],p1[1]-p0[1]),rp=Math.max(2,u*P.rp);
+ const mean=(x,y)=>{let s=0,n=0;const r=Math.ceil(rp);
+  for(let j=-r;j<=r;j++)for(let i=-r;i<=r;i++)if(i*i+j*j<=rp*rp){const X=Math.round(x+i),Y=Math.round(y+j);if(X>=0&&Y>=0&&X<w&&Y<h){s+=g[Y*w+X];n++}}
+  return n?s/n:255};
+ /* อ่านคำตอบ: วงที่เข้มกว่าค่ากลางของแถวมากพอ = ถูกระบาย */
+ const ans=[];
+ for(let q=0;q<ex.n;q++){
+  const m=Array.from({length:P.nc},(_,c)=>mean(...ap(hm,...P.pos(q,c))));
+  const med=[...m].sort((a,b)=>a-b)[2],on=[];
+  m.forEach((v,c)=>{if(med-v>45)on.push(c)});
+  ans.push(on.length==1?on[0]:on.length?-2:-1);   /* -1 ว่าง, -2 ระบายซ้ำ */
+ }
+ let sc=0,tt=0;ex.key.forEach((kk,q)=>{if(kk>=0){tt++;if(ans[q]===kk)sc++}});
+ /* วาดผลทับภาพ */
+ cx.lineWidth=Math.max(2,u*.35);
+ for(let q=0;q<ex.n;q++)for(let c=0;c<P.nc;c++){
+  const[x,y]=ap(hm,...P.pos(q,c)),a=ans[q],kk=ex.key[q];
+  let col=null;
+  if(a===c)col=kk<0?'#2563eb':a===kk?'#16a34a':'#dc2626';
+  else if(kk===c)col='#2563eb';
+  if(col){cx.strokeStyle=col;cx.beginPath();cx.arc(x,y,u*P.ring,0,7);cx.stroke()}
+ }
+ return{cv,ans,sc,tt};
+}
+const keyEx=ex=>({...ex,key:Array(ex.n).fill(-1)});
+function process(src,w,h){
+ const ex=cur(),r=analyze(src,w,h,S.mode=='key'?keyEx(ex):ex);
+ if(r.err){S.res=null;S.msg=r.err}else{S.res=r;S.msg=''}
+}
+/* กล้องสด: อ่านทุก ~0.45 วินาที ถ้าอ่านได้ผลตรงกัน 2 ครั้งติดกันจะรับผลอัตโนมัติ */
+let tk=null,prev=null,busy=false;
+async function startCam(){
+ try{S.cam=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920}}});S.msg='';S.last=null;prev=null;render();clearInterval(tk);tk=setInterval(tick,450)}
+ catch(e){S.msg='เปิดกล้องสดไม่ได้ในหน้านี้ (เบราว์เซอร์ไม่อนุญาต) ใช้ปุ่ม "ถ่ายภาพ / เลือกรูป" แทน';render()}
+}
+function stopCam(){clearInterval(tk);if(S.cam){S.cam.getTracks().forEach(t=>t.stop());S.cam=null}}
+function tick(){
+ const v=$('#vid');if(!S.cam||S.res||!v||!v.videoWidth||busy)return;
+ busy=true;
+ try{
+  const ex=cur(),r=analyze(v,v.videoWidth,v.videoHeight,S.mode=='key'?keyEx(ex):ex,900),st=$('#st');
+  if(r.err){prev=null;S.last=null;if(st)st.textContent='กำลังหามุมกระดาษทั้ง 4 มุม...'}
+  else{const k=r.ans.join();
+   if(k===S.last){if(st)st.textContent='ตรวจแล้ว เปลี่ยนเป็นแผ่นถัดไปได้เลย'}
+   else if(k===prev){S.res=r;prev=null;render()}
+   else{prev=k;if(st)st.textContent='พบกระดาษ กำลังอ่าน ถือให้นิ่ง...'}}
+ }catch(e){}
+ busy=false;
+}
+
+/* ---------- หน้าจอ ---------- */
+const homeV=()=>`<h1>ตรวจข้อสอบ</h1><p class="mut">ใส่เฉลย สแกนกระดาษคำตอบ แล้วได้คะแนนทันที</p>`+
+ (S.ex.length?S.ex.map(e=>{const n=e.sheets.length,av=n?Math.round(e.sheets.reduce((a,s)=>a+s.sc/(s.tt||1),0)/n*100)+'%':'-';
+  return `<button class="card row" data-a="open" data-v="${e.id}"><span><b>${esc(e.name)}</b><br><small class="mut">${e.n} ข้อ, ตรวจแล้ว ${n} ฉบับ</small></span><span class="big">${av}</span></button>`}).join('')
+  :`<p class="card">ยังไม่มีชุดข้อสอบ สร้างชุดแรกได้ด้านล่าง</p>`)+
+ `<div class="card"><h2>สร้างชุดข้อสอบใหม่</h2><label>ชื่อชุดข้อสอบ<input id="nn" placeholder="เช่น สอบกลางภาค คณิต ม.2/1"></label><label>รูปแบบกระดาษคำตอบ<select id="nt"><option value="std">กระดาษ 50 ข้อของครู (ก ข ค ง)</option><option value="app">กระดาษที่พิมพ์จากแอป (A B C D E)</option></select></label><label>จำนวนข้อ<select id="nq">${[10,20,30,40,50].map(n=>`<option ${n==50?'selected':''}>${n}</option>`).join('')}</select></label><button class="b" data-a="new">สร้างและใส่เฉลย</button></div>`;
+
+const keyV=ex=>{const n=ex.key.filter(k=>k>=0).length;
+ return `<button class="b" data-a="scankey">สแกนเฉลยจากกระดาษ</button><p class="mut">หรือแตะตัวเลือกที่ถูกของแต่ละข้อ (แตะซ้ำเพื่อล้าง) ใส่แล้ว ${n}/${ex.n} ข้อ</p><div class="kg">`+
+ ex.key.map((k,q)=>`<div class="kr"><b>${q+1}</b>${[...shp(ex).lab].map((l,c)=>`<button class="bb${k===c?' on':''}" data-a="key" data-q="${q}" data-c="${c}">${l}</button>`).join('')}</div>`).join('')+'</div>'};
+
+const scanV=ex=>{
+ const key=S.mode=='key',has=ex.key.some(k=>k>=0);
+ const seg=`<div class="tabs"><button class="${key?'':'on'}" data-a="mode" data-v="grade">ตรวจข้อสอบ</button><button class="${key?'on':''}" data-a="mode" data-v="key">สแกนเฉลย</button></div>`;
+ if(!key&&!has)return seg+`<p class="card">ยังไม่มีเฉลย เลือก "สแกนเฉลย" เพื่อสแกนจากกระดาษที่ครูระบายเฉลยไว้ หรือใส่เองที่แท็บ "เฉลย"</p>`;
+ const m=S.msg?`<p class="${S.msg=='บันทึกแล้ว'?'':'err'}">${esc(S.msg)}</p>`:'';
+ if(S.res){const r=S.res;
+  if(key){const ok=r.ans.filter(a=>a>=0).length;
+   return seg+`<div class="card"><h2>อ่านเฉลยได้ ${ok}/${ex.n} ข้อ</h2><p class="mut">ข้อที่ไม่ได้ระบายหรือระบายซ้ำจะเว้นว่างไว้ ไปแก้ต่อที่แท็บ "เฉลย" ได้ (วงฟ้า = ที่แอปอ่านได้)</p><div id="out" class="out"></div><button class="b" data-a="usekey">ใช้เป็นเฉลย</button><button class="g" data-a="redo">สแกนใหม่</button></div>`}
+  const bl=r.ans.filter(a=>a===-1).length,mu=r.ans.filter(a=>a===-2).length;
+  return seg+`<div class="card"><div class="score">${r.sc}<small>/${r.tt}</small></div><p class="mut">ถูก ${r.sc} ข้อ, ผิด ${r.tt-r.sc} ข้อ${bl?`, ไม่ได้ตอบ ${bl} ข้อ`:''}${mu?`, ระบายซ้ำ ${mu} ข้อ`:''}<br><small>วงเขียว = ตอบถูก, วงแดง = ตอบผิด, วงฟ้า = เฉลยที่ถูก</small></p>
+  <div id="out" class="out"></div><label>ชื่อนักเรียน<input id="sn" placeholder="ชื่อหรือเลขที่"></label>
+  <button class="b" data-a="save">บันทึกคะแนน</button><button class="g" data-a="redo">สแกนใหม่</button></div>`}
+ if(S.cam)return seg+m+`<video id="vid" autoplay playsinline muted></video><p id="st" class="mut">กำลังหามุมกระดาษทั้ง 4 มุม...</p><button class="b" data-a="snap">ถ่ายทันที</button><button class="g" data-a="stop">ปิดกล้อง</button>`;
+ return seg+m+`<div class="card"><p>${key?'ใช้กระดาษคำตอบที่ครูระบายเฉลยไว้':'วางกระดาษบนพื้นเรียบ ถ่ายทีละแผ่น'} ให้เห็นสี่เหลี่ยมดำที่มุมทั้ง 4 ครบ ถ่ายให้ตรงและแสงสม่ำเสมอ</p>
+ <button class="b" data-a="live">เปิดกล้องสแกนสด</button>
+ <label class="g" style="margin:4px 6px 4px 0">ถ่ายภาพ / เลือกรูป<input type="file" accept="image/*" capture="environment" id="fi" hidden></label></div>`;
+};
+
+const resV=ex=>{
+ const a=ex.sheets,n=a.length;
+ if(!n)return `<p class="card">ยังไม่มีผลคะแนน สแกนกระดาษแล้วกดบันทึก</p>`;
+ const p=s=>s.sc/(s.tt||1)*100,av=a.reduce((x,s)=>x+p(s),0)/n;
+ return `<div class="stats"><div><b>${n}</b>ฉบับ</div><div><b>${av.toFixed(0)}%</b>เฉลี่ย</div><div><b>${Math.max(...a.map(p)).toFixed(0)}%</b>สูงสุด</div><div><b>${Math.min(...a.map(p)).toFixed(0)}%</b>ต่ำสุด</div></div>`+
+ a.map(s=>`<div class="card row" style="cursor:default"><span><b>${esc(s.name)}</b><br><small class="mut">${new Date(s.t).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'})}</small></span><span class="big">${s.sc}/${s.tt}</span><button class="g" data-a="dsc" data-v="${s.id}">${S.arm===s.id?'ยืนยันลบ':'ลบ'}</button></div>`).join('')+
+ `<button class="g" data-a="csv">คัดลอกเป็น CSV</button>${S.msg?`<p class="mut">${esc(S.msg)}</p>`:''}`;
+};
+
+const examV=ex=>`<div class="np"><button class="g" data-a="home">กลับ</button>${ex.t=='std'?'':'<button class="g" data-a="sheet">พิมพ์กระดาษคำตอบ</button>'}<button class="g" data-a="dex">${S.arm==='ex'?'ยืนยันลบชุดนี้':'ลบชุดข้อสอบ'}</button></div>
+ <h1>${esc(ex.name)}</h1><small class="mut">${ex.n} ข้อ</small>
+ <div class="tabs">${[['key','เฉลย'],['scan','สแกน'],['res','ผลคะแนน']].map(([t,l])=>`<button class="${S.tab==t?'on':''}" data-a="tab" data-v="${t}">${l}${t=='res'?` (${ex.sheets.length})`:''}</button>`).join('')}</div>`+
+ (S.tab=='key'?keyV(ex):S.tab=='scan'?scanV(ex):resV(ex));
+
+const sheetV=ex=>`<div class="np"><button class="g" data-a="back">กลับ</button><button class="b" data-a="print">พิมพ์</button>
+ <p class="mut">พิมพ์บนกระดาษ A4 ที่ขนาด 100% (ไม่ย่อ/ขยายอัตโนมัติ) ให้นักเรียนระบายวงกลมให้เต็มด้วยดินสอหรือปากกาสีเข้ม ห้ามตัดสี่เหลี่ยมดำที่มุมออก</p></div><div class="sheet">${sheetSVG(ex)}</div>`;
+
+function render(){
+ const y=scrollY,ex=cur();
+ const h=S.v==='sheet'&&ex?sheetV(ex):S.v==='exam'&&ex?examV(ex):homeV();
+ $('#app').innerHTML='<main>'+h+'</main>';
+ if(S.cam){const v=$('#vid');if(v){v.srcObject=S.cam;v.play().catch(()=>{})}}
+ if(S.res&&$('#out'))$('#out').appendChild(S.res.cv);
+ scrollTo(0,y);
+}
+
+document.addEventListener('click',e=>{
+ const b=e.target.closest('[data-a]');if(!b)return;
+ const a=b.dataset.a,v=b.dataset.v,ex=cur();
+ if(a!=='dsc'&&a!=='dex')S.arm=null;
+ if(a=='open'){const x=S.ex.find(z=>z.id==v);stopCam();S.mode='grade';S.id=v;S.v='exam';S.tab=x.key.some(k=>k>=0)?'scan':'key';S.res=null;S.msg=''}
+ else if(a=='home'){stopCam();S.v='home';S.res=null;S.msg=''}
+ else if(a=='tab'){stopCam();S.tab=v;S.res=null;S.msg=''}
+ else if(a=='new'){const q=+$('#nq').value,x={id:Date.now().toString(36),name:$('#nn').value.trim()||'ข้อสอบใหม่',t:$('#nt').value,n:q,key:Array(q).fill(-1),sheets:[]};
+  S.ex.unshift(x);persist();S.id=x.id;S.v='exam';S.tab='key'}
+ else if(a=='key'){const q=+b.dataset.q,c=+b.dataset.c;ex.key[q]=ex.key[q]===c?-1:c;persist()}
+ else if(a=='sheet')S.v='sheet';
+ else if(a=='back')S.v='exam';
+ else if(a=='print'){window.print();return}
+ else if(a=='live'){startCam();return}
+ else if(a=='snap'){const vd=$('#vid');process(vd,vd.videoWidth,vd.videoHeight)}
+ else if(a=='stop'){stopCam();S.msg=''}
+ else if(a=='mode'){S.mode=v;S.res=null;S.msg='';S.last=null}
+ else if(a=='scankey'){S.mode='key';S.tab='scan';S.res=null;S.msg=''}
+ else if(a=='usekey'){ex.key=S.res.ans.map(a=>a>=0?a:-1);persist();stopCam();S.res=null;S.msg='';S.tab='key'}
+ else if(a=='redo'){S.res=null;S.msg='';S.last=null}
+ else if(a=='save'){const r=S.res;ex.sheets.unshift({id:Date.now().toString(36),name:$('#sn').value.trim()||'นักเรียน '+(ex.sheets.length+1),sc:r.sc,tt:r.tt,t:Date.now()});persist();S.last=r.ans.join();S.res=null;S.msg='บันทึกแล้ว'}
+ else if(a=='dsc'){if(S.arm===v){ex.sheets=ex.sheets.filter(s=>s.id!==v);persist();S.arm=null}else S.arm=v}
+ else if(a=='dex'){if(S.arm==='ex'){S.ex=S.ex.filter(x=>x!==ex);persist();S.v='home';S.arm=null}else S.arm='ex'}
+ else if(a=='csv'){
+  const t='ชื่อ,คะแนน,เต็ม,เปอร์เซ็นต์\n'+ex.sheets.map(s=>`"${s.name.replace(/"/g,'""')}",${s.sc},${s.tt},${(s.sc/(s.tt||1)*100).toFixed(1)}`).join('\n');
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{S.msg='คัดลอกแล้ว วางในตารางคำนวณได้เลย';render()},()=>{S.msg='คัดลอกอัตโนมัติไม่ได้ในหน้านี้';render()});return}
+ render();
+});
+document.addEventListener('change',e=>{
+ if(e.target.id!=='fi'||!e.target.files[0])return;
+ const im=new Image();
+ im.onload=()=>{process(im,im.naturalWidth,im.naturalHeight);render()};
+ im.src=URL.createObjectURL(e.target.files[0]);
+});
+render();
+</script></body></html>
