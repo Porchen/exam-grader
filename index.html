@@ -34,6 +34,7 @@ video{width:100%;border-radius:12px;background:#000}
 .stats div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;text-align:center;font-size:.8rem;color:var(--mut)}
 .stats b{display:block;font-size:1.3rem;color:var(--ink)}
 .err{color:var(--bad);font-weight:600}
+.ok{color:var(--ok);font-weight:700}.nm{display:inline-block;width:auto;max-width:100%;font-weight:600;padding:4px 8px;margin:0}.fs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0}.fs input{width:90px;margin:0}
 .sheet{background:#fff;border-radius:8px;padding:8px}
 @media print{.np{display:none!important}body{background:#fff}main{padding:0;max-width:none}.sheet{padding:0}}
 </style></head>
@@ -43,7 +44,12 @@ const L='ABCDE',W=100,H=110,ROWS=10,$=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let S={ex:[],v:'home',id:null,tab:'key',res:null,cam:null,msg:'',arm:null,mode:'grade',last:null};
 try{S.ex=JSON.parse(localStorage.getItem('omr_exams')||'[]')}catch(e){}
-const persist=()=>{try{localStorage.setItem('omr_exams',JSON.stringify(S.ex))}catch(e){}};
+const persist=()=>{try{localStorage.setItem('omr_exams',JSON.stringify(S.ex));S.se=0}catch(e){S.se=1}};
+const warn=()=>S.se?'<p class="err">เบราว์เซอร์ไม่อนุญาตให้เก็บข้อมูลไว้ในเครื่อง (อาจเปิดโหมดส่วนตัวอยู่) ข้อมูลจะหายเมื่อปิดหน้านี้ ให้กด "คัดลอกเป็น CSV" เก็บไว้ก่อน</p>':'';
+const keyN=ex=>ex.key.filter(k=>k>=0).length;
+const full=ex=>ex.max>0?ex.max:keyN(ex)||1;
+const fmt=n=>String(+(+n).toFixed(2));
+const pts=(s,ex)=>s.tt?s.sc/s.tt*full(ex):0;
 const cur=()=>S.ex.find(e=>e.id===S.id);
 /* ตำแหน่งวงกลมบนกระดาษ (หน่วยกระดาษ 100x110) */
 const pos=(q,c)=>[12.5+Math.floor(q/ROWS)*17.5+c*2.9,16+(q%ROWS)*8.6];
@@ -93,6 +99,7 @@ function analyze(src,sw,sh,ex,md=1100){
  for(let i=0;i<256;i++){wB+=hist[i];if(!wB)continue;const wF=N-wB;if(!wF)break;sB+=i*hist[i];const mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)**2;if(v>best){best=v;t=i}}
  t=Math.min(t,140);
  /* หาสี่เหลี่ยมดำ (เครื่องหมายมุม) */
+ const mn=Math.max(6,Math.min(w,h)*.012),mx=Math.min(w,h)*.15;
  const seen=new Uint8Array(N),st=new Int32Array(N),cand=[];
  for(let p=0;p<N;p++){
   if(seen[p]||g[p]>=t)continue;
@@ -106,13 +113,15 @@ function analyze(src,sw,sh,ex,md=1100){
    if(y<h-1&&!seen[q+w]&&g[q+w]<t){seen[q+w]=1;st[sp++]=q+w}
   }
   const bw=x1-x0+1,bh=y1-y0+1;
-  if(bw>w*.015&&bw<w*.15&&bh>w*.015&&bh<w*.15&&bw/bh>.6&&bw/bh<1.6&&a/(bw*bh)>.8)cand.push([(x0+x1)/2,(y0+y1)/2]);
+  if(bw>mn&&bw<mx&&bh>mn&&bh<mx&&bw/bh>.6&&bw/bh<1.6&&a/(bw*bh)>.8)cand.push([(x0+x1)/2,(y0+y1)/2]);
  }
- const bad={err:'ไม่พบสี่เหลี่ยมดำที่มุมกระดาษครบ 4 จุด ลองถ่ายให้เห็นมุมทั้งสี่ชัดเจน แสงสม่ำเสมอ และไม่มีเงาบัง'};
+ const bad={err:'ไม่พบสี่เหลี่ยมดำที่มุมกระดาษครบ 4 จุด ลองถ่ายให้เห็นมุมทั้งสี่ชัดเจน แสงสม่ำเสมอ และไม่มีเงาบัง',found:cand.length};
  if(cand.length<4)return bad;
  const pk=f=>cand.reduce((a,b)=>f(b)>f(a)?b:a);
  const TL=pk(p=>-(p[0]+p[1])),TR=pk(p=>p[0]-p[1]),BL=pk(p=>p[1]-p[0]),BR=pk(p=>p[0]+p[1]);
  if(new Set([TL,TR,BL,BR]).size<4)return bad;
+ const dd=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]),ra=dd(TL,TR)/dd(TL,BL),rx=P.W/P.H;
+ if(ra<rx*.7||ra>rx*1.4)return bad;
  const hm=homog([[0,0],[P.W,0],[0,P.H],[P.W,P.H]],[TL,TR,BL,BR]);
  const p0=ap(hm,P.W/2,P.H/2),p1=ap(hm,P.W/2+1,P.H/2),u=Math.hypot(p1[0]-p0[0],p1[1]-p0[1]),rp=Math.max(2,u*P.rp);
  const mean=(x,y)=>{let s=0,n=0;const r=Math.ceil(rp);
@@ -131,6 +140,7 @@ function analyze(src,sw,sh,ex,md=1100){
  cx.lineWidth=Math.max(2,u*.35);
  for(let q=0;q<ex.n;q++)for(let c=0;c<P.nc;c++){
   const[x,y]=ap(hm,...P.pos(q,c)),a=ans[q],kk=ex.key[q];
+  if(kk<0&&!ex.all)continue;
   let col=null;
   if(a===c)col=kk<0?'#2563eb':a===kk?'#16a34a':'#dc2626';
   else if(kk===c)col='#2563eb';
@@ -138,13 +148,18 @@ function analyze(src,sw,sh,ex,md=1100){
  }
  return{cv,ans,sc,tt};
 }
-const keyEx=ex=>({...ex,key:Array(ex.n).fill(-1)});
+const keyEx=ex=>({...ex,key:Array(ex.n).fill(-1),all:true});
+function autosave(ex,r){
+ const sv={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),name:'คนที่ '+(ex.sheets.length+1),sc:r.sc,tt:r.tt,t:Date.now()};
+ ex.sheets.unshift(sv);persist();S.last=r.ans;return sv;
+}
 function process(src,w,h){
  const ex=cur(),r=analyze(src,w,h,S.mode=='key'?keyEx(ex):ex);
- if(r.err){S.res=null;S.msg=r.err}else{S.res=r;S.msg=''}
+ if(r.err){S.res=null;S.msg=r.err}else{S.res=r;S.msg='';S.sv=S.mode=='key'?null:autosave(ex,r)}
 }
 /* กล้องสด: อ่านทุก ~0.45 วินาที ถ้าอ่านได้ผลตรงกัน 2 ครั้งติดกันจะรับผลอัตโนมัติ */
-let tk=null,prev=null,busy=false;
+let tk=null,prev=null,busy=false,miss=0;
+const dif=(a,b)=>a.reduce((n,x,i)=>n+(x!==b[i]),0);
 async function startCam(){
  try{S.cam=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920}}});S.msg='';S.last=null;prev=null;render();clearInterval(tk);tk=setInterval(tick,450)}
  catch(e){S.msg='เปิดกล้องสดไม่ได้ในหน้านี้ (เบราว์เซอร์ไม่อนุญาต) ใช้ปุ่ม "ถ่ายภาพ / เลือกรูป" แทน';render()}
@@ -155,24 +170,24 @@ function tick(){
  busy=true;
  try{
   const ex=cur(),r=analyze(v,v.videoWidth,v.videoHeight,S.mode=='key'?keyEx(ex):ex,900),st=$('#st');
-  if(r.err){prev=null;S.last=null;if(st)st.textContent='กำลังหามุมกระดาษทั้ง 4 มุม...'}
-  else{const k=r.ans.join();
-   if(k===S.last){if(st)st.textContent='ตรวจแล้ว เปลี่ยนเป็นแผ่นถัดไปได้เลย'}
-   else if(k===prev){S.res=r;prev=null;render()}
-   else{prev=k;if(st)st.textContent='พบกระดาษ กำลังอ่าน ถือให้นิ่ง...'}}
- }catch(e){}
+  if(r.err){prev=null;if(++miss>=3)S.last=null;if(st)st.textContent=`กำลังหามุมกระดาษ (เห็นสี่เหลี่ยมดำ ${r.found||0} จุด ต้องเห็นมุมทั้ง 4)`}
+  else{miss=0;
+   if(S.last&&dif(S.last,r.ans)<=1){if(st)st.textContent='ตรวจแล้ว เปลี่ยนเป็นแผ่นถัดไปได้เลย'}
+   else if(prev&&dif(prev,r.ans)<=1){prev=null;if(S.mode=='key')S.res=r;else S.lastR={cv:r.cv,sv:autosave(ex,r)};render()}
+   else{prev=r.ans;if(st)st.textContent='พบกระดาษ กำลังอ่าน ถือให้นิ่ง...'}}
+ }catch(e){const st=$('#st');if(st)st.textContent='ผิดพลาด: '+e.message}
  busy=false;
 }
 
 /* ---------- หน้าจอ ---------- */
-const homeV=()=>`<h1>ตรวจข้อสอบ</h1><p class="mut">ใส่เฉลย สแกนกระดาษคำตอบ แล้วได้คะแนนทันที</p>`+
+const homeV=()=>warn()+`<h1>ตรวจข้อสอบ</h1><p class="mut">ใส่เฉลย สแกนกระดาษคำตอบ แล้วได้คะแนนทันที</p>`+
  (S.ex.length?S.ex.map(e=>{const n=e.sheets.length,av=n?Math.round(e.sheets.reduce((a,s)=>a+s.sc/(s.tt||1),0)/n*100)+'%':'-';
   return `<button class="card row" data-a="open" data-v="${e.id}"><span><b>${esc(e.name)}</b><br><small class="mut">${e.n} ข้อ, ตรวจแล้ว ${n} ฉบับ</small></span><span class="big">${av}</span></button>`}).join('')
   :`<p class="card">ยังไม่มีชุดข้อสอบ สร้างชุดแรกได้ด้านล่าง</p>`)+
  `<div class="card"><h2>สร้างชุดข้อสอบใหม่</h2><label>ชื่อชุดข้อสอบ<input id="nn" placeholder="เช่น สอบกลางภาค คณิต ม.2/1"></label><label>รูปแบบกระดาษคำตอบ<select id="nt"><option value="std">กระดาษ 50 ข้อของครู (ก ข ค ง)</option><option value="app">กระดาษที่พิมพ์จากแอป (A B C D E)</option></select></label><label>จำนวนข้อ<select id="nq">${[10,20,30,40,50].map(n=>`<option ${n==50?'selected':''}>${n}</option>`).join('')}</select></label><button class="b" data-a="new">สร้างและใส่เฉลย</button></div>`;
 
 const keyV=ex=>{const n=ex.key.filter(k=>k>=0).length;
- return `<button class="b" data-a="scankey">สแกนเฉลยจากกระดาษ</button><p class="mut">หรือแตะตัวเลือกที่ถูกของแต่ละข้อ (แตะซ้ำเพื่อล้าง) ใส่แล้ว ${n}/${ex.n} ข้อ</p><div class="kg">`+
+ return `<button class="b" data-a="scankey">สแกนเฉลยจากกระดาษ</button><p class="mut">หรือแตะตัวเลือกที่ถูกของแต่ละข้อ (แตะซ้ำเพื่อล้าง) มีเฉลยแล้ว ${n} ข้อ (ข้อที่ไม่มีเฉลยจะไม่ถูกนับคะแนน)</p><div class="kg">`+
  ex.key.map((k,q)=>`<div class="kr"><b>${q+1}</b>${[...shp(ex).lab].map((l,c)=>`<button class="bb${k===c?' on':''}" data-a="key" data-q="${q}" data-c="${c}">${l}</button>`).join('')}</div>`).join('')+'</div>'};
 
 const scanV=ex=>{
@@ -183,11 +198,11 @@ const scanV=ex=>{
  if(S.res){const r=S.res;
   if(key){const ok=r.ans.filter(a=>a>=0).length;
    return seg+`<div class="card"><h2>อ่านเฉลยได้ ${ok}/${ex.n} ข้อ</h2><p class="mut">ข้อที่ไม่ได้ระบายหรือระบายซ้ำจะเว้นว่างไว้ ไปแก้ต่อที่แท็บ "เฉลย" ได้ (วงฟ้า = ที่แอปอ่านได้)</p><div id="out" class="out"></div><button class="b" data-a="usekey">ใช้เป็นเฉลย</button><button class="g" data-a="redo">สแกนใหม่</button></div>`}
-  const bl=r.ans.filter(a=>a===-1).length,mu=r.ans.filter(a=>a===-2).length;
-  return seg+`<div class="card"><div class="score">${r.sc}<small>/${r.tt}</small></div><p class="mut">ถูก ${r.sc} ข้อ, ผิด ${r.tt-r.sc} ข้อ${bl?`, ไม่ได้ตอบ ${bl} ข้อ`:''}${mu?`, ระบายซ้ำ ${mu} ข้อ`:''}<br><small>วงเขียว = ตอบถูก, วงแดง = ตอบผิด, วงฟ้า = เฉลยที่ถูก</small></p>
-  <div id="out" class="out"></div><label>ชื่อนักเรียน<input id="sn" placeholder="ชื่อหรือเลขที่"></label>
-  <button class="b" data-a="save">บันทึกคะแนน</button><button class="g" data-a="redo">สแกนใหม่</button></div>`}
- if(S.cam)return seg+m+`<video id="vid" autoplay playsinline muted></video><p id="st" class="mut">กำลังหามุมกระดาษทั้ง 4 มุม...</p><button class="b" data-a="snap">ถ่ายทันที</button><button class="g" data-a="stop">ปิดกล้อง</button>`;
+  const kq=r.ans.filter((_,i)=>ex.key[i]>=0),bl=kq.filter(a=>a===-1).length,mu=kq.filter(a=>a===-2).length,sv=S.sv;
+  return seg+`<div class="card"><small class="ok">บันทึกคะแนนแล้ว</small><div class="score">${fmt(pts(sv,ex))}<small>/${fmt(full(ex))} คะแนน</small></div><p class="mut">ถูก ${r.sc} จาก ${r.tt} ข้อ${bl?`, ไม่ได้ตอบ ${bl} ข้อ`:''}${mu?`, ระบายซ้ำ ${mu} ข้อ`:''}<br><small>วงเขียว = ตอบถูก, วงแดง = ตอบผิด, วงฟ้า = เฉลยที่ถูก</small></p>
+  <div id="out" class="out"></div><label>ชื่อนักเรียน (แก้ได้)<input id="sn" value="${esc(sv.name)}"></label>
+  <button class="b" data-a="redo">สแกนแผ่นถัดไป</button><button class="g" data-a="delsv">ลบผลนี้</button></div>`}
+ if(S.cam)return seg+m+`<video id="vid" autoplay playsinline muted></video><p id="st" class="mut">กำลังหามุมกระดาษทั้ง 4 มุม...</p><button class="b" data-a="snap">ถ่ายทันที</button><button class="g" data-a="stop">ปิดกล้อง</button>`+(S.lastR?`<div class="card"><small class="ok">บันทึกแล้ว</small><h2>${esc(S.lastR.sv.name)}: ${fmt(pts(S.lastR.sv,ex))}/${fmt(full(ex))} คะแนน</h2><p class="mut">ถูก ${S.lastR.sv.sc} จาก ${S.lastR.sv.tt} ข้อ (ดูและแก้ชื่อได้ที่แท็บ "ผลคะแนน")</p><div id="lo" class="out"></div><button class="g" data-a="dlast">ลบผลนี้</button></div>`:'');
  return seg+m+`<div class="card"><p>${key?'ใช้กระดาษคำตอบที่ครูระบายเฉลยไว้':'วางกระดาษบนพื้นเรียบ ถ่ายทีละแผ่น'} ให้เห็นสี่เหลี่ยมดำที่มุมทั้ง 4 ครบ ถ่ายให้ตรงและแสงสม่ำเสมอ</p>
  <button class="b" data-a="live">เปิดกล้องสแกนสด</button>
  <label class="g" style="margin:4px 6px 4px 0">ถ่ายภาพ / เลือกรูป<input type="file" accept="image/*" capture="environment" id="fi" hidden></label></div>`;
@@ -195,15 +210,17 @@ const scanV=ex=>{
 
 const resV=ex=>{
  const a=ex.sheets,n=a.length;
- if(!n)return `<p class="card">ยังไม่มีผลคะแนน สแกนกระดาษแล้วกดบันทึก</p>`;
- const p=s=>s.sc/(s.tt||1)*100,av=a.reduce((x,s)=>x+p(s),0)/n;
- return `<div class="stats"><div><b>${n}</b>ฉบับ</div><div><b>${av.toFixed(0)}%</b>เฉลี่ย</div><div><b>${Math.max(...a.map(p)).toFixed(0)}%</b>สูงสุด</div><div><b>${Math.min(...a.map(p)).toFixed(0)}%</b>ต่ำสุด</div></div>`+
- a.map(s=>`<div class="card row" style="cursor:default"><span><b>${esc(s.name)}</b><br><small class="mut">${new Date(s.t).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'})}</small></span><span class="big">${s.sc}/${s.tt}</span><button class="g" data-a="dsc" data-v="${s.id}">${S.arm===s.id?'ยืนยันลบ':'ลบ'}</button></div>`).join('')+
+ if(!n)return `<p class="card">ยังไม่มีผลคะแนน สแกนกระดาษแล้วระบบจะบันทึกให้อัตโนมัติ</p>`;
+ const P=a.map(t=>pts(t,ex)),av=P.reduce((x,y)=>x+y,0)/n;
+ return `<p class="mut">คะแนนเต็ม ${fmt(full(ex))} (จากเฉลย ${keyN(ex)} ข้อ)</p><div class="stats"><div><b>${n}</b>ฉบับ</div><div><b>${fmt(av)}</b>เฉลี่ย</div><div><b>${fmt(Math.max(...P))}</b>สูงสุด</div><div><b>${fmt(Math.min(...P))}</b>ต่ำสุด</div></div>`+
+ a.map((t,i)=>`<div class="card row" style="cursor:default"><span><input class="nm" data-sid="${t.id}" value="${esc(t.name)}"><br><small class="mut">ถูก ${t.sc} จาก ${t.tt} ข้อ, ${new Date(t.t).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'})}</small></span><span class="big">${fmt(P[i])}</span><button class="g" data-a="dsc" data-v="${t.id}">${S.arm===t.id?'ยืนยันลบ':'ลบ'}</button></div>`).join('')+
  `<button class="g" data-a="csv">คัดลอกเป็น CSV</button>${S.msg?`<p class="mut">${esc(S.msg)}</p>`:''}`;
 };
 
 const examV=ex=>`<div class="np"><button class="g" data-a="home">กลับ</button>${ex.t=='std'?'':'<button class="g" data-a="sheet">พิมพ์กระดาษคำตอบ</button>'}<button class="g" data-a="dex">${S.arm==='ex'?'ยืนยันลบชุดนี้':'ลบชุดข้อสอบ'}</button></div>
- <h1>${esc(ex.name)}</h1><small class="mut">${ex.n} ข้อ</small>
+ ${warn()}<h1>${esc(ex.name)}</h1>
+ <div class="fs"><span class="mut">คะแนนเต็ม</span><input id="mx" type="number" min="1" step="any" inputmode="decimal" value="${ex.max||''}" placeholder="${keyN(ex)||''}">${[10,15,20,30].map(n=>`<button class="g" style="padding:4px 10px;margin:0" data-a="max" data-v="${n}">${n}</button>`).join('')}<button class="g" style="padding:4px 10px;margin:0" data-a="max" data-v="">1 ข้อ = 1 คะแนน</button></div>
+ <small class="mut">แปลงคะแนนจากข้อที่ถูก ตามจำนวนเฉลย (${keyN(ex)} ข้อ) เป็นคะแนนเต็มที่ตั้งไว้ เปลี่ยนแล้วคะแนนที่บันทึกไว้จะแปลงใหม่ให้อัตโนมัติ</small>
  <div class="tabs">${[['key','เฉลย'],['scan','สแกน'],['res','ผลคะแนน']].map(([t,l])=>`<button class="${S.tab==t?'on':''}" data-a="tab" data-v="${t}">${l}${t=='res'?` (${ex.sheets.length})`:''}</button>`).join('')}</div>`+
  (S.tab=='key'?keyV(ex):S.tab=='scan'?scanV(ex):resV(ex));
 
@@ -216,6 +233,7 @@ function render(){
  $('#app').innerHTML='<main>'+h+'</main>';
  if(S.cam){const v=$('#vid');if(v){v.srcObject=S.cam;v.play().catch(()=>{})}}
  if(S.res&&$('#out'))$('#out').appendChild(S.res.cv);
+ if(S.lastR&&$('#lo'))$('#lo').appendChild(S.lastR.cv);
  scrollTo(0,y);
 }
 
@@ -223,9 +241,9 @@ document.addEventListener('click',e=>{
  const b=e.target.closest('[data-a]');if(!b)return;
  const a=b.dataset.a,v=b.dataset.v,ex=cur();
  if(a!=='dsc'&&a!=='dex')S.arm=null;
- if(a=='open'){const x=S.ex.find(z=>z.id==v);stopCam();S.mode='grade';S.id=v;S.v='exam';S.tab=x.key.some(k=>k>=0)?'scan':'key';S.res=null;S.msg=''}
- else if(a=='home'){stopCam();S.v='home';S.res=null;S.msg=''}
- else if(a=='tab'){stopCam();S.tab=v;S.res=null;S.msg=''}
+ if(a=='open'){const x=S.ex.find(z=>z.id==v);stopCam();S.mode='grade';S.id=v;S.v='exam';S.tab=x.key.some(k=>k>=0)?'scan':'key';S.res=null;S.msg='';S.lastR=null;S.sv=null}
+ else if(a=='home'){stopCam();S.v='home';S.res=null;S.msg='';S.lastR=null;S.sv=null}
+ else if(a=='tab'){stopCam();S.tab=v;S.res=null;S.msg='';S.lastR=null;S.sv=null}
  else if(a=='new'){const q=+$('#nq').value,x={id:Date.now().toString(36),name:$('#nn').value.trim()||'ข้อสอบใหม่',t:$('#nt').value,n:q,key:Array(q).fill(-1),sheets:[]};
   S.ex.unshift(x);persist();S.id=x.id;S.v='exam';S.tab='key'}
  else if(a=='key'){const q=+b.dataset.q,c=+b.dataset.c;ex.key[q]=ex.key[q]===c?-1:c;persist()}
@@ -235,23 +253,27 @@ document.addEventListener('click',e=>{
  else if(a=='live'){startCam();return}
  else if(a=='snap'){const vd=$('#vid');process(vd,vd.videoWidth,vd.videoHeight)}
  else if(a=='stop'){stopCam();S.msg=''}
- else if(a=='mode'){S.mode=v;S.res=null;S.msg='';S.last=null}
+ else if(a=='mode'){S.mode=v;S.res=null;S.msg='';S.last=null;S.lastR=null;S.sv=null}
  else if(a=='scankey'){S.mode='key';S.tab='scan';S.res=null;S.msg=''}
  else if(a=='usekey'){ex.key=S.res.ans.map(a=>a>=0?a:-1);persist();stopCam();S.res=null;S.msg='';S.tab='key'}
- else if(a=='redo'){S.res=null;S.msg='';S.last=null}
- else if(a=='save'){const r=S.res;ex.sheets.unshift({id:Date.now().toString(36),name:$('#sn').value.trim()||'นักเรียน '+(ex.sheets.length+1),sc:r.sc,tt:r.tt,t:Date.now()});persist();S.last=r.ans.join();S.res=null;S.msg='บันทึกแล้ว'}
+ else if(a=='redo'){S.res=null;S.msg='';S.last=null;S.sv=null}
+ else if(a=='delsv'){ex.sheets=ex.sheets.filter(t=>t!==S.sv);persist();S.res=null;S.sv=null;S.last=null;S.msg=''}
+ else if(a=='dlast'){ex.sheets=ex.sheets.filter(t=>t!==S.lastR.sv);persist();S.lastR=null;S.last=null}
+ else if(a=='max'){ex.max=v?+v:null;persist()}
  else if(a=='dsc'){if(S.arm===v){ex.sheets=ex.sheets.filter(s=>s.id!==v);persist();S.arm=null}else S.arm=v}
  else if(a=='dex'){if(S.arm==='ex'){S.ex=S.ex.filter(x=>x!==ex);persist();S.v='home';S.arm=null}else S.arm='ex'}
  else if(a=='csv'){
-  const t='ชื่อ,คะแนน,เต็ม,เปอร์เซ็นต์\n'+ex.sheets.map(s=>`"${s.name.replace(/"/g,'""')}",${s.sc},${s.tt},${(s.sc/(s.tt||1)*100).toFixed(1)}`).join('\n');
+  const t='ชื่อ,ข้อที่ถูก,จำนวนเฉลย,คะแนน,คะแนนเต็ม,เปอร์เซ็นต์\n'+ex.sheets.map(s=>`"${s.name.replace(/"/g,'""')}",${s.sc},${s.tt},${fmt(pts(s,ex))},${fmt(full(ex))},${(s.sc/(s.tt||1)*100).toFixed(1)}`).join('\n');
   (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{S.msg='คัดลอกแล้ว วางในตารางคำนวณได้เลย';render()},()=>{S.msg='คัดลอกอัตโนมัติไม่ได้ในหน้านี้';render()});return}
  render();
 });
 document.addEventListener('change',e=>{
- if(e.target.id!=='fi'||!e.target.files[0])return;
- const im=new Image();
- im.onload=()=>{process(im,im.naturalWidth,im.naturalHeight);render()};
- im.src=URL.createObjectURL(e.target.files[0]);
+ const t=e.target,ex=cur();
+ if(t.id==='fi'&&t.files[0]){const im=new Image();im.onload=()=>{process(im,im.naturalWidth,im.naturalHeight);render()};im.src=URL.createObjectURL(t.files[0])}
+ else if(t.id==='mx'&&ex){ex.max=+t.value>0?+t.value:null;persist();render()}
+ else if(t.id==='sn'&&S.sv){S.sv.name=t.value.trim()||S.sv.name;persist()}
+ else if(t.dataset.sid&&ex){const x=ex.sheets.find(z=>z.id===t.dataset.sid);if(x){x.name=t.value.trim()||x.name;persist()}}
 });
+persist();
 render();
 </script></body></html>
