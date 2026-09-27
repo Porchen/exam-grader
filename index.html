@@ -37,17 +37,22 @@ video{width:100%;border-radius:12px;background:#000}
 .vw{position:relative}.vw video{display:block}.vw canvas{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
 .ok{color:var(--ok);font-weight:700}.nm{display:inline-block;width:auto;max-width:100%;font-weight:600;padding:4px 8px;margin:0}.fs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:8px 0}.fs input{width:90px;margin:0}
 .sheet{background:#fff;border-radius:8px;padding:8px}
+.scanner{position:fixed;inset:0;z-index:100;background:#080b10;color:#fff;display:flex;flex-direction:column;padding:env(safe-area-inset-top) 10px env(safe-area-inset-bottom);box-sizing:border-box}
+.scanner header,.scanner footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 2px;flex-shrink:0}
+.scanner .vw{flex:1;min-height:0;background:#000;overflow:hidden}.scanner video{width:100%;height:100%;object-fit:contain;border-radius:0}
+.scanner footer{min-height:64px}.scanner .g{color:#fff;border-color:#fff;flex-shrink:0}.scanner #st{margin:0;font-size:.92rem}
+.scanphoto{width:100%;height:auto;border-radius:8px}.detailgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(115px,1fr));gap:5px}
 @media print{.np{display:none!important}body{background:#fff}main{padding:0;max-width:none}.sheet{padding:0}}
 </style></head>
 <body><div id="app"></div>
 <script>
 const L='ABCDE',W=100,H=110,ROWS=10,$=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let S={ex:[],v:'home',id:null,tab:'key',res:null,cam:null,msg:'',arm:null,mode:'grade',sv:null,draftName:'',wasCam:false};
+let S={ex:[],v:'home',id:null,tab:'key',res:null,cam:null,msg:'',arm:null,mode:'grade',sv:null,detailId:null,lastScan:'',awaitRemoval:false,missing:0};
 try{const saved=JSON.parse(localStorage.getItem('omr_exams')||'[]');if(Array.isArray(saved))S.ex=saved;else S.se=1}catch(e){S.se=1}
 S.ex.forEach(ex=>{if(ex.t==='zg2'){ex.t='zg';ex.layoutVersion=0}if(ex.t==='std'||ex.t==='zg'&&ex.layoutVersion!==4){ex.sheets.forEach(t=>t.legacy=true)}});
 const persist=()=>{try{localStorage.setItem('omr_exams',JSON.stringify(S.ex));S.se=0;return true}catch(e){S.se=1;return false}};
-const warn=()=>S.se?'<p class="err">เบราว์เซอร์ไม่อนุญาตให้เก็บข้อมูลไว้ในเครื่อง (อาจเปิดโหมดส่วนตัวอยู่) ข้อมูลจะหายเมื่อปิดหน้านี้ โปรดดาวน์โหลดไฟล์สำรอง JSON เก็บไว้ก่อน</p>':'';
+const warn=()=>S.se?'<p class="err">เบราว์เซอร์ไม่อนุญาตให้เก็บข้อมูลไว้ในเครื่อง โปรดเปิดในเบราว์เซอร์ปกติ</p>':'';
 const keyN=ex=>ex.key.filter(k=>k>=0).length;
 const full=ex=>ex.max>0?ex.max:keyN(ex)||1;
 const fmt=n=>String(+(+n).toFixed(2));
@@ -197,39 +202,47 @@ const sameNotice=(ex,ans,exclude)=>{
  const matches=sameAnswers(ex,ans,exclude);
  if(!matches.length)return '';
  const wrong=ans.reduce((n,a,i)=>n+(a>=0&&a!==ex.key[i]?1:0),0);
- return `<div class="card" style="border-color:#b45309"><b>พบคำตอบเหมือนกันทุกข้อ</b><p>ตรงกับ ${matches.map(s=>esc(s.name)).join(', ')} รวมทั้งข้อที่ตอบผิด ${wrong} ข้อ โปรดตรวจชื่อและกระดาษคำตอบก่อนบันทึก</p><small>คำตอบตรงกันเป็นข้อมูลให้ตรวจทาน ยังสรุปไม่ได้ว่ามีการลอกกัน</small></div>`;
+ return `<div class="card" style="border-color:#b45309"><b>พบคำตอบเหมือนกันทุกข้อ</b><p>ตรงกับ ${matches.map(s=>esc(s.name)).join(', ')} รวมทั้งข้อที่ตอบผิด ${wrong} ข้อ โปรดเปิดดูภาพกระดาษคำตอบของทั้งสองฉบับ</p><small>คำตอบตรงกันเป็นข้อมูลให้ตรวจทาน ยังสรุปไม่ได้ว่ามีการลอกกัน</small></div>`;
 };
-function autosave(ex,r,name){
- const sv={id:Date.now().toString(36)+Math.random().toString(36).slice(2,8),name:name||('คนที่ '+(ex.sheets.length+1)),sc:r.sc,tt:r.tt,ans:[...r.ans],t:Date.now()};
- ex.sheets.unshift(sv);if(!persist()){ex.sheets.shift();return null}return sv;
+const db=()=>new Promise((resolve,reject)=>{const q=indexedDB.open('omr_scans',1);q.onupgradeneeded=()=>q.result.createObjectStore('images');q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error)});
+async function imageOp(mode,id,value){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction('images',mode==='get'?'readonly':'readwrite'),store=tx.objectStore('images');let q=mode==='get'?store.get(id):mode==='put'?store.put(value,id):store.delete(id);q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);tx.oncomplete=()=>d.close();tx.onerror=()=>reject(tx.error)})}
+const jpeg=cv=>new Promise((resolve,reject)=>cv.toBlob(b=>b?resolve(b):reject(Error('สร้างภาพสแกนไม่ได้')),'image/jpeg',.82));
+const asData=blob=>new Promise((resolve,reject)=>{const f=new FileReader();f.onload=()=>resolve(f.result);f.onerror=()=>reject(f.error);f.readAsDataURL(blob)});
+const fromData=async str=>{if(typeof str!=='string'||!str.startsWith('data:image/jpeg;base64,'))throw Error('ภาพสำรองไม่ถูกต้อง');return await (await fetch(str)).blob()};
+async function autosave(ex,r){
+ const id=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+ await imageOp('put',id,await jpeg(r.cv));
+ const sv={id,name:'ฉบับที่ '+(ex.sheets.length+1),sc:r.sc,tt:r.tt,ans:[...r.ans],t:Date.now(),review:r.uncertain.length>0,uncertain:[...r.uncertain]};
+ ex.sheets.unshift(sv);if(!persist()){ex.sheets.shift();await imageOp('delete',id);throw Error('พื้นที่เก็บคะแนนเต็ม')}
+ return sv;
 }
 function process(src,w,h,isCam){
  const ex=cur();
  if(S.mode!=='key'&&(ex.t==='std'||keyN(ex)!==ex.n||ex.t==='zg'&&ex.layoutVersion!==4)){S.res=null;S.msg='กรุณาตรวจและยืนยันเฉลยให้ครบก่อนตรวจ';return}
  const r=analyze(src,w,h,S.mode=='key'?keyEx(ex):ex);
- if(r.err){S.res=null;S.msg=r.err}else{S.res=r;S.msg='';S.sv=null;S.draftName='';S.wasCam=S.mode!=='key'&&!!isCam}
+ if(r.err){S.res=null;S.msg=r.err}else{S.res=r;S.msg='';S.sv=null}
 }
 /* กล้องสด: อ่านทุก ~0.3 วินาที เมื่อล็อกมุมได้และอ่านผลนิ่งแล้วจะหยุดกล้องให้ตรวจทานก่อนบันทึก */
 let tk=null,prev=null,busy=false;
 const dif=(a,b)=>a.reduce((n,x,i)=>n+(x!==b[i]),0);
 async function startCam(){
- try{S.cam=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+ try{if(S.mode!=='key')await db().then(d=>d.close());S.cam=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
   try{await S.cam.getVideoTracks()[0].applyConstraints({advanced:[{focusMode:'continuous'}]})}catch(e){}
-  S.msg='';prev=null;render();clearInterval(tk);tk=setInterval(tick,300)}
+  S.msg='';S.res=null;S.awaitRemoval=false;S.missing=0;S.lastScan='';prev=null;render();clearInterval(tk);tk=setInterval(tick,300)}
  catch(e){S.msg='เปิดกล้องสดไม่ได้ในหน้านี้ (เบราว์เซอร์ไม่อนุญาต) ใช้ปุ่ม "ถ่ายภาพ / เลือกรูป" แทน';render()}
 }
-function stopCam(){clearInterval(tk);if(S.cam){S.cam.getTracks().forEach(t=>t.stop());S.cam=null}}
+function stopCam(){clearInterval(tk);prev=null;S.awaitRemoval=false;S.missing=0;if(S.cam){S.cam.getTracks().forEach(t=>t.stop());S.cam=null}}
 /* ตัวเล็ง: วงเล็บ 4 มุมให้วางสี่เหลี่ยมดำ จุดเหลืองคือสิ่งที่แอปเห็น กรอบเขียวคือกระดาษที่ล็อกแล้ว */
 function drawOv(r){
  const v=$('#vid'),c=$('#ov');if(!c||!v||!v.clientWidth)return;
- const W=c.width=v.clientWidth,H=c.height=v.clientHeight,x=c.getContext('2d'),P=shp(cur()),sa=P.W/P.H;
+ const W=c.width=v.clientWidth,H=c.height=v.clientHeight,x=c.getContext('2d'),P=shp(cur()),sa=P.W/P.H,scale=Math.min(W/(v.videoWidth||W),H/(v.videoHeight||H)),rw=(v.videoWidth||W)*scale,rh=(v.videoHeight||H)*scale,ox=(W-rw)/2,oy=(H-rh)/2;
  let gh=H*.9,gw=gh*sa;if(gw>W*.92){gw=W*.92;gh=gw/sa}
  const gx=(W-gw)/2,gy=(H-gh)/2,L=Math.min(gw,gh)*.12,lock=r&&!r.err;
  x.clearRect(0,0,W,H);x.strokeStyle=lock?'#22c55e':'#facc15';x.lineWidth=5;x.lineCap='round';
  [[gx,gy,1,1],[gx+gw,gy,-1,1],[gx,gy+gh,1,-1],[gx+gw,gy+gh,-1,-1]].forEach(([a,b,dx,dy])=>{x.beginPath();x.moveTo(a+dx*L,b);x.lineTo(a,b);x.lineTo(a,b+dy*L);x.stroke()});
  if(!r)return;
- (r.cands||[]).forEach(p=>{x.fillStyle='rgba(250,204,21,.95)';x.beginPath();x.arc(p[0]*W,p[1]*H,4,0,7);x.fill()});
- if(r.quad){x.strokeStyle='#22c55e';x.lineWidth=3;x.beginPath();r.quad.forEach((p,i)=>i?x.lineTo(p[0]*W,p[1]*H):x.moveTo(p[0]*W,p[1]*H));x.closePath();x.stroke()}
+ (r.cands||[]).forEach(p=>{x.fillStyle='rgba(250,204,21,.95)';x.beginPath();x.arc(ox+p[0]*rw,oy+p[1]*rh,4,0,7);x.fill()});
+ if(r.quad){x.strokeStyle='#22c55e';x.lineWidth=3;x.beginPath();r.quad.forEach((p,i)=>i?x.lineTo(ox+p[0]*rw,oy+p[1]*rh):x.moveTo(ox+p[0]*rw,oy+p[1]*rh));x.closePath();x.stroke()}
 }
 function hintOf(r){
  const xs=r.quad.map(p=>p[0]),ys=r.quad.map(p=>p[1]),bw=Math.max(...xs)-Math.min(...xs),bh=Math.max(...ys)-Math.min(...ys);
@@ -237,21 +250,32 @@ function hintOf(r){
  if(Math.max(bw,bh)<.6)return 'ขยับเข้าใกล้กระดาษอีก ให้สี่เหลี่ยมดำอยู่ใกล้วงเล็บสี่มุม';
  return '';
 }
-function tick(){
- const v=$('#vid');if(!S.cam||S.res||!v||!v.videoWidth||busy)return;
+async function tick(){
+ const v=$('#vid');if(!S.cam||!v||!v.videoWidth||busy)return;
  busy=true;
  try{
-  const ex=cur(),E=S.mode=='key'?keyEx(ex):ex,r=analyze(v,v.videoWidth,v.videoHeight,E,900),st=$('#st');
+  const ex=cur(),E=S.mode==='key'?keyEx(ex):ex,r=analyze(v,v.videoWidth,v.videoHeight,E,900),st=$('#st');
   drawOv(r);
-  if(r.err){prev=null;if(st)st.textContent=r.found>=4&&r.err.startsWith('อ่านทิศทาง')?r.err:`กำลังหามุมกระดาษ (เห็นสี่เหลี่ยมดำ ${r.found||0} จุด) วางมุมกระดาษให้ตรงวงเล็บสี่มุม`}
-  else{const hint=hintOf(r),tip=Math.abs(r.tilt-1)>.12?' (ถือมือถือให้ขนานกับกระดาษมากขึ้น)':'';
+  if(S.awaitRemoval){
+   S.missing=r.err?S.missing+1:0;
+   if(S.missing>=6){S.awaitRemoval=false;S.missing=0;prev=null;S.lastScan='ยกแผ่นใหม่เข้ากรอบเพื่อสแกนต่อ';}
+   if(st)st.textContent=S.awaitRemoval?'บันทึกแล้ว ยกแผ่นเดิมออกจากกล้อง':'ยกแผ่นใหม่เข้ากรอบเพื่อสแกนต่อ';
+  }else if(r.err){prev=null;if(st)st.textContent=r.found>=4&&r.err.startsWith('อ่านทิศทาง')?r.err:`กำลังหามุมกระดาษ (เห็นสี่เหลี่ยมดำ ${r.found||0} จุด)`}
+  else{const hint=hintOf(r);
    if(prev&&dif(prev,r.ans)<=1&&!hint){
     prev=null;const r2=analyze(v,v.videoWidth,v.videoHeight,E,1600),f=r2.err?r:r2;
-    stopCam();S.res=f;S.sv=null;S.draftName='';S.wasCam=false;
-    render()}
-   else{prev=r.ans;if(st)st.textContent=`ล็อกมุมแล้ว ${r.nm}/${r.nt} จุด `+(hint||'ถือให้นิ่ง กำลังอ่าน...'+tip)}}
- }catch(e){const st=$('#st');if(st)st.textContent='ผิดพลาด: '+e.message}
- busy=false;
+    if(S.mode==='key'){stopCam();S.res=f;render()}
+    else{
+     S.awaitRemoval=true;S.missing=0;
+     const sv=await autosave(ex,f);
+     S.lastScan=`บันทึกฉบับที่ ${ex.sheets.length} · ${fmt(pts(sv,ex))}/${fmt(full(ex))} คะแนน${sv.review?' · ควรตรวจทาน':''}`;
+     if(st)st.textContent='บันทึกแล้ว ยกแผ่นเดิมออกจากกล้อง';
+     const count=$('#scanCount');if(count)count.textContent=`บันทึกแล้ว ${ex.sheets.length} ฉบับ`;
+     const last=$('#scanLast');if(last)last.textContent=S.lastScan;
+    }
+   }else{prev=r.ans;if(st)st.textContent=`ล็อกมุมแล้ว ${r.nm}/${r.nt} จุด `+(hint||'ถือให้นิ่ง กำลังอ่าน...')}}
+ }catch(e){stopCam();S.msg='บันทึกภาพและคะแนนไม่ได้: '+e.message;render()}
+ finally{busy=false}
 }
 
 /* ---------- หน้าจอ ---------- */
@@ -259,7 +283,7 @@ const homeV=()=>warn()+`<h1>ตรวจข้อสอบ</h1><p class="mut">�
  (S.ex.length?S.ex.map(e=>{const n=e.sheets.length,av=n?Math.round(e.sheets.reduce((a,s)=>a+s.sc/(s.tt||1),0)/n*100)+'%':'-';
   return `<button class="card row" data-a="open" data-v="${e.id}"><span><b>${esc(e.name)}</b><br><small class="mut">${e.n} ข้อ, ตรวจแล้ว ${n} ฉบับ</small></span><span class="big">${av}</span></button>`}).join('')
   :`<p class="card">ยังไม่มีชุดข้อสอบ สร้างชุดแรกได้ด้านล่าง</p>`)+
- `<div class="card"><h2>สำรองข้อมูล</h2><p>บันทึกชุดข้อสอบ เฉลย และคะแนนไว้เป็นไฟล์หลังตรวจแต่ละห้อง</p><button class="g" data-a="backup">ดาวน์โหลดไฟล์สำรอง JSON</button><label class="g">นำไฟล์สำรองกลับเข้าแอป<input id="restore" type="file" accept="application/json,.json" hidden></label></div><div class="card"><h2>สร้างชุดข้อสอบใหม่</h2><label>ชื่อชุดข้อสอบ<input id="nn" placeholder="เช่น สอบกลางภาค คณิต ม.2/1"></label><label>รูปแบบกระดาษคำตอบ<select id="nt"><option value="zg">กระดาษ ZipGrade 50 ข้อ (A–E หรือ ก–จ)</option><option value="app">กระดาษที่พิมพ์จากแอป (A B C D E)</option></select></label><label>จำนวนข้อ<select id="nq">${[10,20,30,40,50].map(n=>`<option ${n==50?'selected':''}>${n}</option>`).join('')}</select></label><button class="b" data-a="new">สร้างและใส่เฉลย</button></div>`;
+ `<div class="card"><h2>สำรองข้อมูล</h2><p>สำรองชุดข้อสอบ เฉลย คะแนน และภาพสแกนไว้ในไฟล์เดียวหลังตรวจแต่ละห้อง</p><button class="g" data-a="backup">ดาวน์โหลดไฟล์สำรอง JSON</button><label class="g">นำไฟล์สำรองกลับเข้าแอป<input id="restore" type="file" accept="application/json,.json" hidden></label></div><div class="card"><h2>สร้างชุดข้อสอบใหม่</h2><label>ชื่อชุดข้อสอบ<input id="nn" placeholder="เช่น สอบกลางภาค คณิต ม.2/1"></label><label>รูปแบบกระดาษคำตอบ<select id="nt"><option value="zg">กระดาษ ZipGrade 50 ข้อ (A–E หรือ ก–จ)</option><option value="app">กระดาษที่พิมพ์จากแอป (A B C D E)</option></select></label><label>จำนวนข้อ<select id="nq">${[10,20,30,40,50].map(n=>`<option ${n==50?'selected':''}>${n}</option>`).join('')}</select></label><button class="b" data-a="new">สร้างและใส่เฉลย</button></div>`;
 
 const keyV=ex=>{const n=keyN(ex),locked=ex.sheets.some(s=>!s.legacy);
  return `${locked?`<p class="card err">มีผลคะแนนแล้ว ${ex.sheets.length} ฉบับ เฉลยถูกล็อกไว้เพื่อไม่ให้คะแนนคลาดเคลื่อน หากต้องการแก้เฉลยให้สร้างชุดข้อสอบใหม่</p>`:`<button class="b" data-a="scankey">สแกนเฉลยจากกระดาษ</button><p class="mut">หรือแตะตัวเลือกที่ถูกของแต่ละข้อ (แตะซ้ำเพื่อล้าง)</p>`}<p class="mut">มีเฉลยแล้ว ${n}/${ex.n} ข้อ${ex.t==='zg'?' · กระดาษภาษาไทย: A=ก, B=ข, C=ค, D=ง, E=จ':''}</p>${ex.t==='zg'&&ex.layoutVersion!==4?'<p class="err">แม่แบบ ZipGrade ได้รับการแก้ไข โปรดตรวจเฉลยเดิมทุกข้ออีกครั้ง</p>':''}${n===ex.n&&!locked&&ex.t==='zg'&&ex.layoutVersion!==4?'<button class="b" data-a="verifykey">ตรวจเฉลย A–E ครบแล้ว</button>':''}<div class="kg">`+
@@ -273,11 +297,9 @@ const scanV=ex=>{
  if(S.res){const r=S.res;
   if(key){const ok=r.ans.filter(a=>a>=0).length;
    return seg+`<div class="card"><h2>อ่านเฉลยได้ ${ok}/${ex.n} ข้อ</h2><p class="mut">ข้อที่ไม่ได้ระบายหรือระบายซ้ำจะเว้นว่างไว้ ไปแก้ต่อที่แท็บ "เฉลย" ได้ (วงฟ้า = ที่แอปอ่านได้)</p><div id="out" class="out"></div><button class="b" data-a="usekey">ใช้เป็นเฉลย</button><button class="g" data-a="redo">สแกนใหม่</button></div>`}
-  const kq=r.ans.filter((_,i)=>ex.key[i]>=0),bl=kq.filter(a=>a===-1).length,mu=kq.filter(a=>a===-2).length,sv=S.sv;
-  return seg+`<div class="card"><small class="${sv?'ok':'mut'}">${sv?'บันทึกคะแนนแล้ว':'ตรวจทานก่อนบันทึก'}</small><div class="score">${fmt(pts(sv||r,ex))}<small>/${fmt(full(ex))} คะแนน</small></div><p class="mut">ถูก ${r.sc} จาก ${r.tt} ข้อ${bl?`, ไม่ได้ตอบ ${bl} ข้อ`:''}${mu?`, ระบายซ้ำ ${mu} ข้อ`:''}<br><small>วงเขียว = ตอบถูก, วงแดง = ตอบผิด, วงฟ้า = เฉลยที่ถูก</small></p>
-  ${sameNotice(ex,r.ans,sv)}<p class="mut">วงสีบนภาพแสดงผลสแกนครั้งแรก หากแก้คำตอบด้านล่าง ให้ยึดคำตอบที่เลือกและคะแนนที่คำนวณใหม่</p>${r.uncertain.length?`<p class="card err">โปรดตรวจข้อที่อ่านไม่ชัด: ${r.uncertain.join(', ')}</p>`:''}<div id="out" class="out"></div><label>ชื่อนักเรียน<input id="sn" value="${esc(sv?sv.name:S.draftName||'')}" placeholder="กรอกชื่อก่อนบันทึก"></label><details><summary>ตรวจและแก้คำตอบรายข้อ</summary><div class="kg">${r.ans.map((a,q)=>`<label>ข้อ ${q+1}<select class="answer" data-q="${q}"><option value="-1" ${a===-1?'selected':''}>ว่าง</option><option value="-2" ${a===-2?'selected':''}>ระบายซ้ำ</option>${[...shp(ex).lab].map((l,c)=>`<option value="${c}" ${a===c?'selected':''}>${l}</option>`).join('')}</select></label>`).join('')}</div></details><label><input id="reviewed" type="checkbox" style="display:inline;width:auto"> ฉันตรวจชื่อ คำตอบ และวงที่อ่านไม่ชัดกับกระดาษจริงแล้ว</label><button class="b" data-a="savegrade">${sv?'บันทึกการแก้ไข':'ยืนยันบันทึกคะแนน'}</button>
-  <button class="g" data-a="redo">สแกนแผ่นถัดไป</button>${sv?'<button class="g" data-a="delsv">ลบผลนี้</button>':''}</div>`}
- if(S.cam)return seg+m+`<div class="vw"><video id="vid" autoplay playsinline muted></video><canvas id="ov"></canvas></div><p id="st" class="mut">กำลังหามุมกระดาษทั้ง 4 มุม...</p><button class="b" data-a="snap">ถ่ายทันที</button><button class="g" data-a="stop">ปิดกล้อง</button>`;
+  return seg+`<div class="card"><h2>บันทึกแล้ว</h2><div class="score">${fmt(pts(S.sv||r,ex))}<small>/${fmt(full(ex))} คะแนน</small></div><p>${esc(S.msg)}</p><div id="out" class="out"></div><button class="b" data-a="detail" data-v="${S.sv?.id||''}">ดูผลที่บันทึก</button><button class="g" data-a="redo">สแกนแผ่นถัดไป</button></div>`}
+
+ if(S.cam)return `<div class="scanner"><header><b id="scanCount">บันทึกแล้ว ${ex.sheets.length} ฉบับ</b><button class="g" data-a="stop">ดูผลคะแนน</button></header><div class="vw"><video id="vid" autoplay playsinline muted></video><canvas id="ov"></canvas></div><footer><span><span id="st">วางกระดาษให้เห็นสี่เหลี่ยมดำครบ</span><br><small id="scanLast">${esc(S.lastScan)}</small></span></footer></div>`;
  return seg+m+`<div class="card"><p>${key?'ใช้กระดาษคำตอบที่ครูระบายเฉลยไว้':'วางกระดาษบนพื้นเรียบ ถ่ายทีละแผ่น'} ให้เห็นสี่เหลี่ยมดำที่มุมทั้ง 4 ครบ ถ่ายให้ตรงและแสงสม่ำเสมอ</p>
  <button class="b" data-a="live">เปิดกล้องสแกนสด</button>
  <label class="g" style="margin:4px 6px 4px 0">ถ่ายภาพ / เลือกรูป<input type="file" accept="image/*" capture="environment" id="fi" hidden></label></div>`;
@@ -285,39 +307,45 @@ const scanV=ex=>{
 
 const resV=ex=>{
  const old=ex.sheets.filter(t=>t.legacy),a=ex.sheets.filter(t=>!t.legacy),n=a.length;
- if(!n&&!old.length)return `<p class="card">ยังไม่มีผลคะแนน สแกนกระดาษแล้วตรวจทานก่อนบันทึกได้เลย</p>`;
+ if(!ex.sheets.length)return '<p class="card">ยังไม่มีผลคะแนน</p>';
  const P=a.map(t=>pts(t,ex)),av=n?P.reduce((x,y)=>x+y,0)/n:0;
- return `${old.length?`<p class="card err">คะแนนเดิม ${old.length} ฉบับใช้แม่แบบเก่า ต้องตรวจใหม่ก่อนนำไปใช้</p>`:''}<p class="mut">คะแนนเต็ม ${fmt(full(ex))} (จากเฉลย ${keyN(ex)} ข้อ)</p><div class="stats"><div><b>${n}</b>ฉบับ</div><div><b>${fmt(av)}</b>เฉลี่ย</div><div><b>${n?fmt(Math.max(...P)):'–'}</b>สูงสุด</div><div><b>${n?fmt(Math.min(...P)):'–'}</b>ต่ำสุด</div></div>`+
- [...a,...old].map((t,i)=>`<div class="card row" style="cursor:default"><span><input class="nm" data-sid="${t.id}" value="${esc(t.name)}"><br><small class="mut">${t.legacy?'คะแนนเก่า · ':''}ถูก ${t.sc} จาก ${t.tt} ข้อ, ${new Date(t.t).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'})}</small></span><span class="big">${t.legacy?'ต้องตรวจใหม่':fmt(P[i])}</span><button class="g" data-a="dsc" data-v="${t.id}">${S.arm===t.id?'ยืนยันลบ':'ลบ'}</button></div>`).join('')+
+ return `${old.length?`<p class="card err">คะแนนเดิม ${old.length} ฉบับใช้แม่แบบเก่า ต้องตรวจใหม่</p>`:''}<div class="stats"><div><b>${n}</b>ฉบับ</div><div><b>${fmt(av)}</b>เฉลี่ย</div><div><b>${n?fmt(Math.max(...P)):'–'}</b>สูงสุด</div><div><b>${n?fmt(Math.min(...P)):'–'}</b>ต่ำสุด</div></div>`+
+ ex.sheets.map(t=>`<div class="card row"><button class="card row" style="margin:0;flex:1" data-a="detail" data-v="${t.id}"><span><b>${esc(t.name)}</b><br><small class="mut">${new Date(t.t).toLocaleString('th-TH')} ${t.review?'· ควรตรวจทาน':''}</small></span><span class="big">${t.legacy?'ต้องตรวจใหม่':fmt(pts(t,ex))}</span></button><button class="g" data-a="dsc" data-v="${t.id}">${S.arm===t.id?'ยืนยันลบ':'ลบ'}</button></div>`).join('')+
  `<button class="g" data-a="csv">ดาวน์โหลด CSV</button>${S.msg?`<p class="mut">${esc(S.msg)}</p>`:''}`;
 };
+const detailV=ex=>{
+ const t=ex.sheets.find(x=>x.id===S.detailId);if(!t)return resV(ex);
+ const lab=[...shp(ex).lab];
+ return `<button class="g" data-a="backresults">กลับไปผลคะแนน</button><h2>${esc(t.name)} · ${t.legacy?'ต้องตรวจใหม่':fmt(pts(t,ex))+'/'+fmt(full(ex))+' คะแนน'}</h2><p class="mut">${new Date(t.t).toLocaleString('th-TH')} · ถูก ${t.sc}/${t.tt} ข้อ</p>${!t.legacy?sameNotice(ex,t.ans,t):''}${t.review?`<p class="card err">มีข้อที่ควรตรวจทาน: ${(t.uncertain||[]).join(', ')}</p>`:''}<div id="savedImage">กำลังโหลดภาพที่บันทึก...</div><h2>คำตอบรายข้อ</h2><div class="detailgrid">${(t.ans||[]).map((a,i)=>`<div class="card" style="margin:0">ข้อ ${i+1}: ${a===-1?'ว่าง':a===-2?'ซ้ำ':lab[a]||'–'}<br><small>เฉลย ${lab[ex.key[i]]||'–'}</small></div>`).join('')}</div>`;
+};
+async function showSavedImage(id){const slot=$('#savedImage');if(!slot)return;try{const blob=await imageOp('get',id);if(!slot.isConnected)return;if(!blob){slot.textContent='ผลคะแนนเดิมไม่มีภาพสแกนที่บันทึกไว้';return}const url=URL.createObjectURL(blob),img=document.createElement('img');img.className='scanphoto';img.alt='ภาพกระดาษคำตอบที่สแกนพร้อมวงตรวจ';img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>URL.revokeObjectURL(url);img.src=url;slot.replaceChildren(img)}catch(e){slot.textContent='เปิดภาพที่บันทึกไม่ได้: '+e.message}}
 
 const examV=ex=>`<div class="np"><button class="g" data-a="home">กลับ</button>${ex.t=='app'?'<button class="g" data-a="sheet">พิมพ์กระดาษคำตอบ</button>':''}<button class="g" data-a="dex">${S.arm==='ex'?'ยืนยันลบชุดนี้':'ลบชุดข้อสอบ'}</button></div>
  ${warn()}<h1>${esc(ex.name)}</h1>
  <div class="fs"><span class="mut">คะแนนเต็ม</span><input id="mx" type="number" min="1" step="any" inputmode="decimal" value="${ex.max||''}" placeholder="${keyN(ex)||''}">${[10,15,20,30].map(n=>`<button class="g" style="padding:4px 10px;margin:0" data-a="max" data-v="${n}">${n}</button>`).join('')}<button class="g" style="padding:4px 10px;margin:0" data-a="max" data-v="">1 ข้อ = 1 คะแนน</button></div>
  <small class="mut">แปลงคะแนนจากข้อที่ถูก ตามจำนวนเฉลย (${keyN(ex)} ข้อ) เป็นคะแนนเต็มที่ตั้งไว้ เปลี่ยนแล้วคะแนนที่บันทึกไว้จะแปลงใหม่ให้อัตโนมัติ</small>
  <div class="tabs">${[['key','เฉลย'],['scan','สแกน'],['res','ผลคะแนน']].map(([t,l])=>`<button class="${S.tab==t?'on':''}" data-a="tab" data-v="${t}">${l}${t=='res'?` (${ex.sheets.length})`:''}</button>`).join('')}</div>`+
- (S.tab=='key'?keyV(ex):S.tab=='scan'?scanV(ex):resV(ex));
+ (S.tab=='key'?keyV(ex):S.tab=='scan'?scanV(ex):S.detailId?detailV(ex):resV(ex));
 
 const sheetV=ex=>`<div class="np"><button class="g" data-a="back">กลับ</button><button class="b" data-a="print">พิมพ์</button>
  <p class="mut">พิมพ์บนกระดาษ A4 ที่ขนาด 100% (ไม่ย่อ/ขยายอัตโนมัติ) ให้นักเรียนระบายวงกลมให้เต็มด้วยดินสอหรือปากกาสีเข้ม ห้ามตัดสี่เหลี่ยมดำที่มุมออก</p></div><div class="sheet">${sheetSVG(ex)}</div>`;
 
 function render(){
  const y=scrollY,ex=cur();
- const h=S.v==='sheet'&&ex?sheetV(ex):S.v==='exam'&&ex?examV(ex):homeV();
- $('#app').innerHTML='<main>'+h+'</main>';
+ const h=S.cam&&S.mode==='grade'&&S.v==='exam'&&S.tab==='scan'?scanV(ex):S.v==='sheet'&&ex?sheetV(ex):S.v==='exam'&&ex?examV(ex):homeV();
+ $('#app').innerHTML=S.cam&&S.mode==='grade'&&S.tab==='scan'?h:'<main>'+h+'</main>';
  if(S.cam){const v=$('#vid');if(v){v.srcObject=S.cam;v.play().catch(()=>{})}}
- if(S.res&&$('#out'))$('#out').appendChild(S.res.cv);
- scrollTo(0,y);
+ if(S.res&&$('#out'))$('#out').appendChild(S.res.cv);if(S.detailId&&S.tab==='res')showSavedImage(S.detailId);
+ if(S.cam)scrollTo(0,0);else scrollTo(0,y);
 }
 
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-a]');if(!b)return;
  const a=b.dataset.a,v=b.dataset.v,ex=cur();
  if(a!=='dsc'&&a!=='dex')S.arm=null;
- if(a=='open'){const x=S.ex.find(z=>z.id==v);stopCam();S.mode='grade';S.id=v;S.v='exam';S.tab=x.key.some(k=>k>=0)?'scan':'key';S.res=null;S.msg='';S.sv=null;S.draftName='';S.wasCam=false}
- else if(a=='home'){stopCam();S.v='home';S.res=null;S.msg='';S.sv=null;S.draftName='';S.wasCam=false}
- else if(a=='tab'){stopCam();S.tab=v;S.res=null;S.msg='';S.sv=null;S.draftName='';S.wasCam=false}
+ if(a=='open'){const x=S.ex.find(z=>z.id==v);stopCam();S.mode='grade';S.id=v;S.v='exam';S.tab=x.key.some(k=>k>=0)?'scan':'key';S.res=null;S.msg='';S.sv=null;S.detailId=null}
+ else if(a=='home'){stopCam();S.v='home';S.res=null;S.msg='';S.sv=null;S.detailId=null}
+ else if(a=='tab'){stopCam();S.tab=v;S.detailId=null;S.res=null;S.msg='';S.sv=null}
  else if(a=='new'){const q=+$('#nq').value,x={id:Date.now().toString(36),layoutVersion:4,name:$('#nn').value.trim()||'ข้อสอบใหม่',t:$('#nt').value,n:q,key:Array(q).fill(-1),sheets:[]};
   S.ex.unshift(x);persist();S.id=x.id;S.v='exam';S.tab='key'}
  else if(a=='verifykey'){if(keyN(ex)!==ex.n){alert('เฉลยยังไม่ครบ');return}ex.layoutVersion=4;persist()}
@@ -326,25 +354,19 @@ document.addEventListener('click',e=>{
  else if(a=='back')S.v='exam';
  else if(a=='print'){window.print();return}
  else if(a=='live'){if(S.mode!=='key'&&(ex.t==='std'||keyN(ex)!==ex.n||ex.t==='zg'&&ex.layoutVersion!==4)){alert('กรุณาตรวจเฉลยให้ครบก่อนสแกน');return}startCam();return}
- else if(a=='snap'){const vd=$('#vid');process(vd,vd.videoWidth,vd.videoHeight,true);stopCam()}
- else if(a=='stop'){stopCam();S.msg=''}
- else if(a=='mode'){S.mode=v;S.res=null;S.msg='';S.sv=null;S.draftName='';S.wasCam=false}
+ else if(a=='snap'){return}
+ else if(a=='stop'){stopCam();S.tab='res';S.detailId=null;S.msg=''}
+ else if(a=='mode'){S.mode=v;S.res=null;S.msg='';S.sv=null}
  else if(a=='scankey'){S.mode='key';S.tab='scan';S.res=null;S.msg=''}
  else if(a=='usekey'){if(ex.sheets.some(s=>!s.legacy)){alert('มีผลคะแนนแล้ว กรุณาสร้างชุดข้อสอบใหม่หากต้องการแก้เฉลย');return}if(S.res.ans.some(a=>a<0)){alert('อ่านเฉลยไม่ครบ กรุณาถ่ายใหม่หรือเติมเฉลยด้วยมือ');return}ex.key=S.res.ans.map(a=>a>=0?a:-1);persist();stopCam();S.res=null;S.msg='';S.tab='key'}
- else if(a=='savegrade'){
-  const name=($('#sn')&&$('#sn').value||'').trim();
-  if(!name){alert('กรุณากรอกชื่อนักเรียนก่อนบันทึก');return}if(!$('#reviewed').checked){alert('กรุณาตรวจคำตอบกับกระดาษจริงและทำเครื่องหมายยืนยันก่อนบันทึก');return}
-  const r=S.res;r.sc=0;r.tt=0;ex.key.forEach((k,q)=>{if(k>=0){r.tt++;if(r.ans[q]===k)r.sc++}});
-  if(S.sv){Object.assign(S.sv,{name,sc:r.sc,tt:r.tt,ans:[...r.ans]});persist()}else{S.sv=autosave(ex,r,name);if(!S.sv){alert('บันทึกคะแนนไม่ได้ พื้นที่เก็บข้อมูลอาจเต็ม กรุณาดาวน์โหลดไฟล์สำรอง');return}}
-  S.msg='บันทึกแล้ว';
-  S.wasCam=false;
- }
- else if(a=='redo'){S.res=null;S.sv=null;S.draftName='';S.msg='';S.wasCam=false}
- else if(a=='delsv'){ex.sheets=ex.sheets.filter(t=>t!==S.sv);persist();S.sv=null;S.msg=''}
+ else if(a=='redo'){S.res=null;S.sv=null;S.msg=''}
+ else if(a=='detail'){S.tab='res';S.detailId=v;S.res=null}
+ else if(a=='backresults'){S.detailId=null}
+ else if(a=='delsv'){return}
  else if(a=='max'){ex.max=v?+v:null;persist()}
- else if(a=='dsc'){if(S.arm===v){ex.sheets=ex.sheets.filter(s=>s.id!==v);persist();S.arm=null}else S.arm=v}
- else if(a=='dex'){if(S.arm==='ex'){S.ex=S.ex.filter(x=>x!==ex);persist();S.v='home';S.arm=null}else S.arm='ex'}
- else if(a=='backup'){const url=URL.createObjectURL(new Blob([JSON.stringify({format:'omr-backup',version:1,ex:S.ex})],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='สำรองข้อมูลตรวจข้อสอบ.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return}
+ else if(a=='dsc'){if(S.arm===v){ex.sheets=ex.sheets.filter(s=>s.id!==v);persist();imageOp('delete',v).catch(()=>{});S.arm=null;S.detailId=null}else S.arm=v}
+ else if(a=='dex'){if(S.arm==='ex'){S.ex=S.ex.filter(x=>x!==ex);persist();ex.sheets.forEach(t=>imageOp('delete',t.id).catch(()=>{}));S.v='home';S.arm=null}else S.arm='ex'}
+ else if(a=='backup'){(async()=>{try{const images={};for(const x of S.ex)for(const sheet of x.sheets){const blob=await imageOp('get',sheet.id);if(blob)images[sheet.id]=await asData(blob)}const url=URL.createObjectURL(new Blob([JSON.stringify({format:'omr-backup',version:2,ex:S.ex,images})],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='สำรองข้อมูลตรวจข้อสอบพร้อมภาพ.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000)}catch(err){alert('สำรองข้อมูลไม่ได้: '+err.message)}})();return}
  else if(a=='csv'){
   const rows=ex.sheets.filter(s=>!s.legacy).map(s=>`"${s.name.replace(/^[=+@\-\t\r]/,x=>"'"+x).replace(/"/g,'""')}",${s.sc},${s.tt},${fmt(pts(s,ex))},${fmt(full(ex))},${(s.sc/(s.tt||1)*100).toFixed(1)}`).join('\n');
   const t='ชื่อ,ข้อที่ถูก,จำนวนเฉลย,คะแนน,คะแนนเต็ม,เปอร์เซ็นต์\n'+rows;
@@ -355,13 +377,10 @@ document.addEventListener('click',e=>{
 });
 document.addEventListener('change',e=>{
  const t=e.target,ex=cur();
- if(t.id==='restore'&&t.files[0]){t.files[0].text().then(raw=>{try{const data=JSON.parse(raw);if(data.format!=='omr-backup'||!Array.isArray(data.ex)||data.ex.some(x=>!Number.isInteger(x.n)||x.n<1||x.n>50||!Array.isArray(x.key)||x.key.length!==x.n||!Array.isArray(x.sheets)||!['zg','zg2','std','app'].includes(x.t)))throw Error('รูปแบบไฟล์ไม่ถูกต้อง');const ids=new Set(S.ex.map(x=>x.id));const add=data.ex.map(x=>{const y=structuredClone(x);if(y.t==='zg2'){y.t='zg';y.layoutVersion=0}if(y.t==='std'||y.t==='zg'&&y.layoutVersion!==4)y.sheets.forEach(t=>t.legacy=true);if(ids.has(y.id))y.id=Date.now().toString(36)+Math.random().toString(36).slice(2);ids.add(y.id);return y});S.ex.push(...add);if(!persist()){S.ex.splice(-add.length);throw Error('พื้นที่เก็บข้อมูลไม่พอ')}S.msg='นำเข้าข้อมูล '+add.length+' ชุดแล้ว';render()}catch(err){alert('นำเข้าข้อมูลไม่ได้: '+err.message)}});return}
- if(t.id==='fi'&&t.files[0]){const im=new Image();im.onload=()=>{process(im,im.naturalWidth,im.naturalHeight,false);render()};im.src=URL.createObjectURL(t.files[0])}
+ if(t.id==='restore'&&t.files[0]){(async()=>{try{const data=JSON.parse(await t.files[0].text());if(data.format!=='omr-backup'||!Array.isArray(data.ex)||data.ex.some(x=>!Number.isInteger(x.n)||x.n<1||x.n>50||!Array.isArray(x.key)||x.key.length!==x.n||!Array.isArray(x.sheets)||!['zg','zg2','std','app'].includes(x.t)))throw Error('รูปแบบไฟล์ไม่ถูกต้อง');const ids=new Set(S.ex.map(x=>x.id)),added=[];for(const x of data.ex){const y=structuredClone(x);if(y.t==='zg2'){y.t='zg';y.layoutVersion=0}if(y.t==='std'||y.t==='zg'&&y.layoutVersion!==4)y.sheets.forEach(t=>t.legacy=true);if(ids.has(y.id))y.id=Date.now().toString(36)+Math.random().toString(36).slice(2);ids.add(y.id);for(const sheet of y.sheets){const old=sheet.id;sheet.id=Date.now().toString(36)+Math.random().toString(36).slice(2,10);if(data.images?.[old]){await imageOp('put',sheet.id,await fromData(data.images[old]));added.push(sheet.id)}}S.ex.push(y)}if(!persist())throw Error('พื้นที่เก็บข้อมูลไม่พอ');S.msg='นำเข้าข้อมูลแล้ว';render()}catch(err){alert('นำเข้าข้อมูลไม่ได้: '+err.message)}})();return}
+ if(t.id==='fi'&&t.files[0]){const im=new Image();im.onload=async()=>{process(im,im.naturalWidth,im.naturalHeight,false);if(S.res&&S.mode==='grade'){try{S.sv=await autosave(cur(),S.res);S.msg='บันทึกภาพและคะแนนแล้ว'}catch(err){S.res=null;S.msg='บันทึกภาพและคะแนนไม่ได้: '+err.message}}render();URL.revokeObjectURL(im.src)};im.src=URL.createObjectURL(t.files[0])}
  else if(t.id==='mx'&&ex){ex.max=+t.value>0?+t.value:null;persist();render()}
- else if(t.id==='sn'){if(S.sv){S.sv.name=t.value.trim()||S.sv.name;persist()}else S.draftName=t.value}
- else if(t.classList.contains('answer')&&S.res&&ex){S.draftName=$('#sn')?.value||'';S.res.ans[+t.dataset.q]=+t.value;const r=S.res;r.sc=0;r.tt=0;ex.key.forEach((k,i)=>{if(k>=0){r.tt++;if(r.ans[i]===k)r.sc++}});render()}
- else if(t.dataset.sid&&ex){const x=ex.sheets.find(z=>z.id===t.dataset.sid);if(x){x.name=t.value.trim()||x.name;persist()}}
-});
+ });
 if(!S.se)persist();
 render();
 </script></body></html>
