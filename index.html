@@ -192,7 +192,7 @@ function analyze(src,sw,sh,ex,md=1100){
  const head=document.createElement('canvas');head.width=650;head.height=136;
  const hd=head.getContext('2d'),pixels=hd.createImageData(head.width,head.height),hi=pixels.data;
  for(let yy=0;yy<head.height;yy++)for(let xx=0;xx<head.width;xx++){
-  const sy=P.H*(.018+.135*yy/head.height),sx=P.W*xx/head.width,[ix,iy]=ap(hm,sx,sy),X=Math.round(ix),Y=Math.round(iy),o=(yy*head.width+xx)*4;
+  const sy=P.H*((ex.t==='zg'?-.045:.018)+.135*yy/head.height),sx=P.W*xx/head.width,[ix,iy]=ap(hm,sx,sy),X=Math.round(ix),Y=Math.round(iy),o=(yy*head.width+xx)*4;
   if(X>=0&&X<w&&Y>=0&&Y<h){const at=(Y*w+X)*4;hi[o]=d[at];hi[o+1]=d[at+1];hi[o+2]=d[at+2];hi[o+3]=255}else{hi[o]=hi[o+1]=hi[o+2]=255;hi[o+3]=255}
  }
  hd.putImageData(pixels,0,0);
@@ -225,7 +225,7 @@ async function autosave(ex,r){
  const id=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
  const fullBlob=await jpeg(r.cv),headBlob=await jpeg(r.head);
  try{await imageOp('put',id+'-head',headBlob);await imageOp('put',id,fullBlob)}catch(err){await imageOp('delete',id+'-head').catch(()=>{});throw err}
- const sv={imageBytes:fullBlob.size+headBlob.size,id,name:'ฉบับที่ '+(ex.sheets.length+1),sc:r.sc,tt:r.tt,ans:[...r.ans],t:Date.now(),review:r.uncertain.length>0,uncertain:[...r.uncertain]};
+ const sv={imageBytes:fullBlob.size+headBlob.size,headVersion:2,id,name:'ฉบับที่ '+(ex.sheets.length+1),sc:r.sc,tt:r.tt,ans:[...r.ans],t:Date.now(),review:r.uncertain.length>0,uncertain:[...r.uncertain]};
  ex.sheets.unshift(sv);if(!persist()){ex.sheets.shift();await imageOp('delete',id);await imageOp('delete',id+'-head');throw Error('พื้นที่เก็บคะแนนเต็ม')}
  return sv;
 }
@@ -332,7 +332,24 @@ const detailV=ex=>{
  const lab=[...shp(ex).lab];
  return `<button class="g" data-a="backresults">กลับไปผลคะแนน</button><h2>${esc(t.name)} · ${t.legacy?'ต้องตรวจใหม่':fmt(pts(t,ex))+'/'+fmt(full(ex))+' คะแนน'}</h2><p class="mut">${new Date(t.t).toLocaleString('th-TH')} · ถูก ${t.sc}/${t.tt} ข้อ · ${fmt(t.sc/(t.tt||1)*100)}%</p><img class="headphoto" style="width:100%;height:auto;max-height:180px" data-thumb="${t.id}" alt="หัวกระดาษคำตอบที่มีชื่อผู้สอบ">${!t.legacy?sameNotice(ex,t.ans,t):''}${t.review?`<p class="card err">มีข้อที่ควรตรวจทาน: ${(t.uncertain||[]).join(', ')}</p>`:''}<div id="savedImage">กำลังโหลดภาพที่บันทึก...</div><h2>คำตอบรายข้อ</h2><div class="detailgrid">${(t.ans||[]).map((a,i)=>`<div class="card" style="margin:0">ข้อ ${i+1}: ${a===-1?'ว่าง':a===-2?'ซ้ำ':lab[a]||'–'}<br><small>เฉลย ${lab[ex.key[i]]||'–'}</small></div>`).join('')}</div>`;
 };
-async function showThumbnails(){for(const el of document.querySelectorAll('[data-thumb]')){try{const blob=await imageOp('get',el.dataset.thumb+'-head');if(!el.isConnected)continue;if(!blob){el.replaceWith(document.createTextNode('ภาพหัวกระดาษไม่มีในผลเดิม'));continue}const url=URL.createObjectURL(blob);el.onload=()=>URL.revokeObjectURL(url);el.onerror=()=>URL.revokeObjectURL(url);el.src=url}catch(e){el.alt='เปิดภาพหัวกระดาษไม่ได้'}}}
+async function refreshHead(ex,t){
+ const original=await imageOp('get',t.id);if(!original)return null;
+ const url=URL.createObjectURL(original),img=new Image();
+ try{
+  await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=()=>reject(Error('เปิดภาพเดิมไม่ได้'));img.src=url});
+  const result=analyze(img,img.naturalWidth,img.naturalHeight,ex,1100);
+  if(result.err)return null;
+  const blob=await jpeg(result.head);await imageOp('put',t.id+'-head',blob);
+  t.headVersion=2;persist();return blob;
+ }finally{URL.revokeObjectURL(url)}
+}
+async function showThumbnails(){const ex=cur();for(const el of document.querySelectorAll('[data-thumb]')){
+ try{const t=ex.sheets.find(x=>x.id===el.dataset.thumb);let blob=await imageOp('get',el.dataset.thumb+'-head');
+  if(t&&t.headVersion!==2&&ex.t==='zg')blob=await refreshHead(ex,t)||blob;
+  if(!el.isConnected)continue;
+  if(!blob){el.replaceWith(document.createTextNode('ภาพหัวกระดาษไม่มีในผลเดิม'));continue}
+  const url=URL.createObjectURL(blob);el.onload=()=>URL.revokeObjectURL(url);el.onerror=()=>URL.revokeObjectURL(url);el.src=url;
+ }catch(e){el.alt='เปิดภาพหัวกระดาษไม่ได้'}}}
 async function showStorage(){const el=$('#storageInfo');if(!el)return;const bytes=S.ex.flatMap(e=>e.sheets).reduce((n,x)=>n+(x.imageBytes||0),0);let estimate='';try{const q=await navigator.storage.estimate();estimate=q.quota?' · เบราว์เซอร์จัดสรรพื้นที่ประมาณ '+fmt(q.quota/1048576)+' MB':''}catch(e){}if(el.isConnected)el.textContent='ภาพที่แอปบันทึกประมาณ '+fmt(bytes/1048576)+' MB'+estimate+' (พื้นที่จริงขึ้นกับมือถือและเบราว์เซอร์)'}
 async function showSavedImage(id){const slot=$('#savedImage');if(!slot)return;try{const blob=await imageOp('get',id);if(!slot.isConnected)return;if(!blob){slot.textContent='ผลคะแนนเดิมไม่มีภาพสแกนที่บันทึกไว้';return}const url=URL.createObjectURL(blob),img=document.createElement('img');img.className='scanphoto';img.alt='ภาพกระดาษคำตอบที่สแกนพร้อมวงตรวจ';img.onload=()=>URL.revokeObjectURL(url);img.onerror=()=>URL.revokeObjectURL(url);img.src=url;slot.replaceChildren(img)}catch(e){slot.textContent='เปิดภาพที่บันทึกไม่ได้: '+e.message}}
 
